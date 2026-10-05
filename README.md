@@ -39,7 +39,8 @@ If verify fails with `cannot import name '_with_origin'` (or similar), PySpark i
 
 ```powershell
 .\fabric\fabric\scripts\reinstall_local_spark.ps1
-# or manually: pip uninstall -y pyspark delta-spark py4j; pip cache purge; pip install pyspark==3.5.4 delta-spark==3.2.0
+# Deletes .venv under C:\spark-dev (or nearest parent), recreates it, pip install -r requirements-local-spark.txt, runs verify.
+# In-place pip only: .\reinstall_local_spark.ps1 -KeepVenv
 ```
 
 Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversableOnce` / `scala.collection.*` on `spark.table`:

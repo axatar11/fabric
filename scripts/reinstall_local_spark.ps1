@@ -1,46 +1,70 @@
-# Reinstall PySpark in YOUR venv (not Windows Store python). Run from anywhere.
+# Delete .venv and recreate it, then install PySpark (cleanest fix for broken packages).
 # Usage: .\reinstall_local_spark.ps1
-#    or: C:\spark-dev\.venv\Scripts\Activate.ps1; .\reinstall_local_spark.ps1
+#        .\reinstall_local_spark.ps1 -KeepVenv    # only pip reinstall, no venv delete
+
+param(
+    [switch]$KeepVenv
+)
 
 $ErrorActionPreference = "Continue"
 
-function Find-VenvPython {
-    if ($env:VIRTUAL_ENV) {
-        $p = Join-Path $env:VIRTUAL_ENV "Scripts\python.exe"
-        if (Test-Path $p) { return $p }
-    }
-    $dir = Split-Path -Parent $PSScriptRoot
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+$Requirements = Join-Path $RepoRoot "requirements-local-spark.txt"
+
+function Find-VenvRoot {
+    $dir = $RepoRoot
     while ($dir) {
-        $p = Join-Path $dir ".venv\Scripts\python.exe"
-        if (Test-Path $p) { return $p }
+        if (Test-Path (Join-Path $dir ".venv")) {
+            return $dir
+        }
         $parent = Split-Path -Parent $dir
         if (-not $parent -or $parent -eq $dir) { break }
         $dir = $parent
     }
-    return $null
+    # Default: C:\spark-dev when repo is C:\spark-dev\fabric\fabric
+    $d = Split-Path -Parent $RepoRoot
+    if ($d) { return (Split-Path -Parent $d) }
+    return $RepoRoot
 }
 
-$py = Find-VenvPython
-if (-not $py) {
-    Write-Host "ERROR: No .venv found. Create one first, e.g.:" -ForegroundColor Red
-    Write-Host "  cd C:\spark-dev"
-    Write-Host "  py -3.12 -m venv .venv"
-    Write-Host "  .\.venv\Scripts\Activate.ps1"
-    Write-Host "  pip install -r fabric\fabric\requirements-local-spark.txt"
+function Get-PyVersionArg {
+    foreach ($ver in @("3.12", "3.11")) {
+        & py "-$ver" -c "import sys" 2>$null
+        if ($LASTEXITCODE -eq 0) { return "-$ver" }
+    }
+    Write-Host "ERROR: Install Python 3.11 or 3.12 (py launcher)." -ForegroundColor Red
+    exit 1
+}
+
+$venvRoot = Find-VenvRoot
+$venvPath = Join-Path $venvRoot ".venv"
+$py = Join-Path $venvPath "Scripts\python.exe"
+$pyArg = Get-PyVersionArg
+
+Write-Host "Venv root:" $venvRoot
+Write-Host "Requirements:" $Requirements
+
+if (-not $KeepVenv) {
+    if (Test-Path $venvPath) {
+        Write-Host "Removing existing .venv..."
+        Remove-Item -Recurse -Force $venvPath
+    }
+    Write-Host "Creating new venv (py $pyArg)..."
+    & py $pyArg -m venv $venvPath
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} elseif (-not (Test-Path $py)) {
+    Write-Host "ERROR: .venv not found. Run without -KeepVenv." -ForegroundColor Red
     exit 1
 }
 
 Write-Host "Using Python:" $py
-& $py -c "import sys; print('  version:', sys.version.split()[0])"
-
-Write-Host "Removing old PySpark packages..."
-& $py -m pip uninstall -y pyspark delta-spark py4j | Out-Null
-
-Write-Host "Purging pip cache..."
-& $py -m pip cache purge | Out-Null
-
-Write-Host "Installing pyspark==3.5.4 delta-spark==3.2.0..."
-& $py -m pip install pyspark==3.5.4 delta-spark==3.2.0 py4j==0.10.9.7
+& $py -m pip install --upgrade pip
+if (-not (Test-Path $Requirements)) {
+    Write-Host "ERROR: Missing $Requirements" -ForegroundColor Red
+    exit 1
+}
+Write-Host "Installing from requirements-local-spark.txt..."
+& $py -m pip install -r $Requirements
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Remove-Item Env:SPARK_HOME -ErrorAction SilentlyContinue
