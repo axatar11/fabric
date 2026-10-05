@@ -33,8 +33,8 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_COUNTRY: onelake_table_path(
             silver, "dbo/CoreCountry_Excel_Hours_Historic"
         ),
-        config.TABLE_HC_SILVER: onelake_table_path(med, "Silver/HC_Silver_Historical"),
-        config.TABLE_OKTA_SILVER: onelake_table_path(med, "Silver/Okta_User_for_AI"),
+        config.TABLE_HC_SILVER: onelake_table_path(med, "Silver/hc_silver_historical"),
+        config.TABLE_OKTA_SILVER: onelake_table_path(med, "Silver/okta_user_for_ai"),
         config.TABLE_CURSOR_SILVER: onelake_table_path(med, "Silver/cursor_usage"),
         config.TABLE_FACT_CURSOR_ACTIVE: onelake_table_path(
             med, "Gold/Fact_Cursor_Active"
