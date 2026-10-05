@@ -12,6 +12,9 @@ from common import config
 _AZURE_CLI_WIN = r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"
 _TOKEN_PROVIDER = "org.fabric.onelake.EnvAccessTokenProvider"
 _ONELAKE_CLI_JAR = Path(__file__).resolve().parent / "jars" / "onelake-cli-token-provider.jar"
+_HADOOP_CONF_TOKEN = "org.fabric.onelake.access.token"
+_HADOOP_CONF_TOKEN_FILE = "org.fabric.onelake.token.file"
+_HADOOP_CONF_TOKEN_EXPIRY = "org.fabric.onelake.token.expiry"
 
 
 def onelake_cli_token_jar() -> str:
@@ -42,20 +45,35 @@ def azure_cli_access_token() -> tuple[str, int]:
     return token.token, int(token.expires_on)
 
 
-def refresh_abfs_token_env() -> None:
-    """Expose Azure CLI token to Hadoop CustomTokenProvider (EnvAccessTokenProvider)."""
+def abfs_token_cache_path() -> Path:
+    override = os.environ.get("ONELAKE_TOKEN_CACHE")
+    if override:
+        return Path(override)
+    return Path.home() / ".fabric" / "onelake_abfs_token"
+
+
+def refresh_abfs_token_env() -> tuple[str, int, Path]:
+    """Azure CLI token for JVM (file + env); PySpark JVM does not see os.environ after start."""
     access_token, expires_on = azure_cli_access_token()
     os.environ["ONELAKE_ABFS_ACCESS_TOKEN"] = access_token
     os.environ["ONELAKE_ABFS_TOKEN_EXPIRY"] = str(expires_on)
+    cache = abfs_token_cache_path()
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(access_token, encoding="utf-8")
+    os.environ["ONELAKE_ABFS_TOKEN_FILE"] = str(cache)
+    return access_token, expires_on, cache
 
 
 def apply_azure_cli_abfs_conf(spark) -> None:
     """Configure abfss for spark.read.format('delta') with az login (no tenant/SP env vars)."""
-    refresh_abfs_token_env()
+    access_token, expires_on, cache = refresh_abfs_token_env()
     host = config.ONELAKE_HOST
     p = "fs.azure.account"
     spark.conf.set(f"{p}.auth.type.{host}", "Custom")
     spark.conf.set(f"{p}.oauth.provider.type.{host}", _TOKEN_PROVIDER)
+    spark.conf.set(f"spark.hadoop.{_HADOOP_CONF_TOKEN}", access_token)
+    spark.conf.set(f"spark.hadoop.{_HADOOP_CONF_TOKEN_FILE}", str(cache))
+    spark.conf.set(f"spark.hadoop.{_HADOOP_CONF_TOKEN_EXPIRY}", str(expires_on))
 
 
 def fabric_storage_options() -> dict[str, Any]:
