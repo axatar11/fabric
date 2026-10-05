@@ -10,9 +10,13 @@ if TYPE_CHECKING:
 
 
 def onelake_table_path(lakehouse_id: str, *subpath: str) -> str:
-    base = (
-        f"abfss://{WORKSPACEID}@{ONELAKE_HOST}/{lakehouse_id}.Lakehouse/Tables"
-    )
+    """Same abfss layout as NB_Cursor_Bronze (guid/Tables/..., no .Lakehouse suffix)."""
+    suffix = ".Lakehouse" if os.environ.get("ONELAKE_LAKEHOUSE_SUFFIX", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ) else ""
+    base = f"abfss://{WORKSPACEID}@{ONELAKE_HOST}/{lakehouse_id}{suffix}/Tables"
     return "/".join([base, *subpath])
 
 
@@ -68,7 +72,14 @@ def _read_delta_via_azure_cli(spark: SparkSession, path: str) -> DataFrame:
 
     from common.fabric_storage import fabric_storage_options
 
-    dt = DeltaTable(path, storage_options=fabric_storage_options())
+    opts = fabric_storage_options()
+    try:
+        dt = DeltaTable(path, storage_options=opts)
+    except OSError as exc:
+        raise OSError(
+            f"{exc}\nOneLake path used: {path}\n"
+            "(Copy path from Fabric if different; set ONELAKE_TABLE_OVERRIDES in local_settings.py)"
+        ) from exc
     return spark.createDataFrame(dt.to_pandas())
 
 
