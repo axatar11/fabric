@@ -76,12 +76,28 @@ def _prepare_pyspark_env() -> None:
             os.environ.pop("PYSPARK_PYTHON", None)
 
 
+def _hadoop_version() -> str:
+    """Match Spark's bundled Hadoop (PySpark 3.5.x ships 3.3.4)."""
+    override = os.environ.get("MEDALLION_HADOOP_VERSION")
+    if override:
+        return override
+    try:
+        import pyspark
+
+        if pyspark.__version__.startswith("3.5."):
+            return "3.3.4"
+    except ImportError:
+        pass
+    return "3.3.4"
+
+
 def _onelake_jar_packages() -> str:
     """Delta + Hadoop Azure (required for abfss:// OneLake paths)."""
-    azure = os.environ.get(
-        "MEDALLION_AZURE_PACKAGES",
-        "org.apache.hadoop:hadoop-azure:3.3.6,com.azure:azure-storage-blob:12.25.1",
+    hv = _hadoop_version()
+    default_azure = (
+        f"org.apache.hadoop:hadoop-azure:{hv},com.azure:azure-storage-blob:12.25.1"
     )
+    azure = os.environ.get("MEDALLION_AZURE_PACKAGES", default_azure)
     delta = os.environ.get("MEDALLION_DELTA_PACKAGES", "io.delta:delta-spark_2.12:3.2.0")
     return f"{delta},{azure}"
 
@@ -128,7 +144,8 @@ def _apply_onelake_spark_conf(spark) -> None:
 
 def create_onelake_spark(app_name: str = "Medallion"):
     """Local Spark with Delta + Hadoop Azure (abfss) + OneLake OAuth env vars."""
-    return _build_spark(app_name)
+    spark, _, _ = _build_spark(app_name)
+    return spark
 
 
 def _build_spark(app_name: str):
@@ -142,6 +159,7 @@ def _build_spark(app_name: str):
             pass
 
     packages = os.environ.get("MEDALLION_SPARK_PACKAGES") or _onelake_jar_packages()
+    hadoop_ver = _hadoop_version()
     builder = (
         SparkSession.builder.appName(app_name)
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
@@ -157,7 +175,7 @@ def _build_spark(app_name: str):
     spark = builder.getOrCreate()
     _apply_onelake_spark_conf(spark)
     spark.range(1).count()
-    return spark
+    return spark, packages, hadoop_ver
 
 
 def _get_spark(notebook_globals: dict[str, Any], app_name: str):
@@ -179,7 +197,13 @@ def _get_spark(notebook_globals: dict[str, Any], app_name: str):
         from pyspark.sql import SparkSession
 
         return SparkSession.builder.getOrCreate(), {"runtime": rt, "mode": "getOrCreate"}
-    return _build_spark(app_name), {"runtime": "local", "mode": "created"}
+    spark, packages, hadoop_ver = _build_spark(app_name)
+    return spark, {
+        "runtime": "local",
+        "mode": "created",
+        "jar_packages": packages,
+        "hadoop_version": hadoop_ver,
+    }
 
 
 def show_sample(df, n: int = 10) -> None:
@@ -216,11 +240,15 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
 
     import pyspark
 
+    hv = info.get("hadoop_version") or _hadoop_version()
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "
         f"spark={spark.version} pyspark={pyspark.__version__} "
-        f"path_reads={io._use_path_reads()}"
+        f"hadoop_azure={hv} path_reads={io._use_path_reads()}"
     )
+    jars = info.get("jar_packages")
+    if jars and io._use_path_reads():
+        print(f"spark.jars.packages={jars}")
     if io._use_path_reads() and info.get("mode") in ("attached", "custom"):
         print(
             "OneLake abfss reads need hadoop-azure on this Spark session. "

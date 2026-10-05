@@ -64,6 +64,8 @@ Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversa
    ```
    Restart the Jupyter kernel, re-run bootstrap, or use `create_onelake_spark` from `local_settings.example.py`.
 
+5. **`WeakReferenceMap` / `NoClassDefFoundError`** — **hadoop-azure** version is newer than Spark's bundled **hadoop-common** (common if `MEDALLION_AZURE_PACKAGES` pins 3.3.6). Bootstrap defaults **hadoop-azure 3.3.4** for PySpark 3.5.x; override with `MEDALLION_HADOOP_VERSION` only if it matches your Spark Hadoop build. Then `MEDALLION_FRESH_SPARK=1` and restart the kernel.
+
 Run `python scripts/verify_local_spark.py` in your venv to sanity-check Spark before opening a notebook.
 
 Open `NB_CursorUsage_Bronze_To_Silver.ipynb` → Run All.
