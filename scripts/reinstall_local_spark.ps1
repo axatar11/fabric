@@ -75,13 +75,13 @@ function Find-VenvRoot {
 
 $basePython = Find-BasePython
 if (-not $basePython) {
-    Write-Host "ERROR: No Python 3.11 or 3.12 found." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Install from https://www.python.org/downloads/ (3.12.x), enable 'py launcher', OR set:"
-    Write-Host '  $env:MEDALLION_PYTHON = "C:\full\path\to\python.exe"'
-    Write-Host "Then run this script again."
-    Write-Host ""
-    Write-Host "If you only have Python 3.14, PySpark 3.5 is not supported — install 3.12 alongside it."
+    Write-Host 'ERROR: No Python 3.11 or 3.12 found.' -ForegroundColor Red
+    Write-Host ''
+    Write-Host 'Install Python 3.12 from python.org, or set MEDALLION_PYTHON to python.exe path.'
+    Write-Host '  Example: $env:MEDALLION_PYTHON = C:\Python312\python.exe'
+    Write-Host 'Then run this script again.'
+    Write-Host ''
+    Write-Host 'Python 3.14 is not supported for PySpark 3.5. Install 3.12 alongside it.'
     if (Get-Command py -ErrorAction SilentlyContinue) {
         Write-Host "Installed py versions:"
         & py --list 2>$null
