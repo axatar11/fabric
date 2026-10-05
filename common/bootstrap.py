@@ -253,6 +253,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         if cursor_path:
             print(f"TABLE_CURSOR_BRONZE -> {cursor_path}")
         print("Tip: set MEDALLION_DEBUG_READ=1 before bootstrap to log read progress.")
+        print(
+            "Tip: large tables — read_table() one at a time; transient Azure errors auto-retry."
+        )
 
 
 init_notebook(globals())
