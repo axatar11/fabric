@@ -80,27 +80,6 @@ def _read_debug(msg: str) -> None:
         print(msg, flush=True)
 
 
-def _arrow_to_spark_df(spark: SparkSession, table) -> DataFrame:
-    import pyarrow as pa
-    from pyspark.sql.types import StructField, StructType
-    from pyspark.sql.pandas.types import from_arrow_type
-
-    table = pa.Table.combine_chunks(table)
-    try:
-        return spark.createDataFrame(table)
-    except Exception:
-        schema = StructType(
-            [
-                StructField(field.name, from_arrow_type(field.type), nullable=field.nullable)
-                for field in table.schema
-            ]
-        )
-        cols = [table.column(i).to_pylist() for i in range(table.num_columns)]
-        if not cols:
-            return spark.createDataFrame([], schema)
-        return spark.createDataFrame(list(zip(*cols)), schema=schema)
-
-
 def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
     """Azure CLI + deltalake (Fabric endpoint) -> Spark DataFrame; same auth as NB_Cursor_Bronze."""
     from deltalake import DeltaTable
@@ -109,10 +88,11 @@ def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
 
     _read_debug(f"read_table: deltalake open {path}")
     dt = DeltaTable(path, storage_options=fabric_storage_options())
-    _read_debug("read_table: deltalake loading pyarrow...")
-    table = dt.to_pyarrow_table()
-    _read_debug(f"read_table: {table.num_rows} rows -> Spark")
-    return _arrow_to_spark_df(spark, table)
+    _read_debug("read_table: deltalake loading data...")
+    # PySpark createDataFrame(pyarrow Table) can yield all-NULL rows; pandas bridge matches NB_Cursor_Bronze.
+    pdf = dt.to_pandas()
+    _read_debug(f"read_table: {len(pdf)} rows -> Spark")
+    return spark.createDataFrame(pdf)
 
 
 def _read_delta_via_pyspark(spark: SparkSession, path: str) -> DataFrame:
