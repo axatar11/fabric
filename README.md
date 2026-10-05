@@ -24,7 +24,7 @@ az login
 pip install -r fabric\fabric\requirements-local-spark.txt
 ```
 
-Optional: copy `common/local_settings.example.py` → `common/local_settings.py` only if you need a custom `create_spark()`.
+You do **not** need `local_settings.py` for default tables — paths are built in `config.py` (same as your Fabric ABFS path for cursor bronze). Copy `local_settings.example.py` → `local_settings.py` only to override paths or Spark.
 
 Table registration (`CREATE TABLE … LOCATION abfss://…`) is **off** by default (it caused catalog/Scala errors on many local setups). Turn on only if you need it:
 

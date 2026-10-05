@@ -227,6 +227,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         print(f"spark.jars.packages={jars}")
     if io._use_path_reads() and read_mode == "azure-cli+deltalake":
         print("OneLake reads: az login + AzureCliCredential (see NB_Cursor_Bronze.ipynb).")
+        cursor_path = io.delta_path_for_table(config.TABLE_CURSOR_BRONZE)
+        if cursor_path:
+            print(f"TABLE_CURSOR_BRONZE -> {cursor_path}")
 
 
 init_notebook(globals())

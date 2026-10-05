@@ -1,4 +1,7 @@
-# Copy to common/local_settings.py (gitignored) only if you need a custom SparkSession.
+# Optional — do NOT copy unless you need overrides. Default OneLake paths are in config.py.
+# Copy to common/local_settings.py (gitignored) only for custom Spark or path overrides:
+#
+# ONELAKE_TABLE_OVERRIDES = {"AI_Medallion.Bronze.cursor_usage": "abfss://..."}
 
 
 def create_spark(app_name: str = "MedallionLocal"):

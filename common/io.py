@@ -27,7 +27,7 @@ def delta_path_for_table(table_fqn: str) -> str | None:
     bronze = config.LAKEHOUSE_AI_MEDALLION_BRONZE_ID
     silver = config.LAKEHOUSE_AI_MEDALLION_SILVER_ID
     mapping = {
-        config.TABLE_CURSOR_BRONZE: onelake_table_path(med, "Bronze/cursor_usage"),
+        config.TABLE_CURSOR_BRONZE: config.ONELAKE_CURSOR_BRONZE_PATH,
         config.TABLE_HC_BRONZE: onelake_table_path(bronze, "dbo/HC_Bronze_Historical"),
         config.TABLE_OKTA_BRONZE: onelake_table_path(bronze, "dbo/CoreOktaUser"),
         config.TABLE_COUNTRY: onelake_table_path(
