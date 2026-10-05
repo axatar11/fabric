@@ -51,8 +51,8 @@ function Find-BasePython {
     }
 
     if (Test-Path "$env:LOCALAPPDATA\Python") {
-        Get-ChildItem "$env:LOCALAPPDATA\Python" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-            $exe = Join-Path $_.FullName "python.exe"
+        foreach ($dir in Get-ChildItem "$env:LOCALAPPDATA\Python" -Directory -ErrorAction SilentlyContinue) {
+            $exe = Join-Path $dir.FullName "python.exe"
             if (Test-Python312Or311 $exe) { return $exe }
         }
     }
