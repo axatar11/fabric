@@ -67,6 +67,13 @@ def main() -> int:
         print("If you see GenTraversableOnce, remove SPARK_HOME or match it to pyspark version.")
         return 1
 
+    try:
+        import setuptools  # noqa: F401 — distutils shim for PySpark+pandas on 3.12
+    except ImportError as exc:
+        print("FAIL missing setuptools (distutils shim):", exc)
+        print(f"  python -m pip install -r {REPO / 'requirements-local-spark.txt'}")
+        return 1
+
     for pkg, import_name in (
         ("deltalake", "deltalake"),
         ("azure-identity", "azure.identity"),
