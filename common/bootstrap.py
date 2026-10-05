@@ -179,6 +179,10 @@ def _ensure_onelake_read_deps() -> None:
         import pandas  # noqa: F401
     except ImportError:
         missing.append("pandas")
+    try:
+        import setuptools  # noqa: F401
+    except ImportError:
+        missing.append("setuptools")
     if not missing:
         return
     req = Path(__file__).resolve().parent.parent / "requirements-local-spark.txt"

@@ -80,9 +80,14 @@ def _read_delta_via_azure_cli(spark: SparkSession, path: str) -> DataFrame:
             f"{exc}\nOneLake path used: {path}\n"
             "(Copy path from Fabric if different; set ONELAKE_TABLE_OVERRIDES in local_settings.py)"
         ) from exc
-    # PyArrow -> Spark avoids PySpark's pandas path (distutils removed on Python 3.12).
-    arrow_table = dt.to_pyarrow_table()
-    return spark.createDataFrame(arrow_table)
+    # deltalake -> pandas -> Spark (PySpark 3.5 cannot createDataFrame(pa.Table) directly).
+    try:
+        import setuptools  # noqa: F401 — distutils shim for PySpark on Python 3.12
+    except ImportError as exc:
+        raise ImportError(
+            "PySpark needs setuptools on Python 3.12: python -m pip install setuptools"
+        ) from exc
+    return spark.createDataFrame(dt.to_pandas())
 
 
 def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
