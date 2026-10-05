@@ -11,7 +11,7 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from common import config, io, transforms
+from common import config, fabric_storage, io, transforms
 
 
 def _local_settings() -> dict[str, Any]:
@@ -77,19 +77,19 @@ def _prepare_pyspark_env() -> None:
 
 
 def _spark_jar_packages() -> str:
-    """Delta on Spark; optional hadoop-azure if you set MEDALLION_SPARK_PACKAGES or SPARK abfss reads."""
+    """Delta + hadoop-azure for local OneLake abfss reads."""
     override = os.environ.get("MEDALLION_SPARK_PACKAGES")
     if override:
         return override
     delta = os.environ.get("MEDALLION_DELTA_PACKAGES", "io.delta:delta-spark_2.12:3.2.0")
-    if os.environ.get("MEDALLION_SPARK_DELTA_READ", "").lower() in ("1", "true", "yes"):
-        hv = os.environ.get("MEDALLION_HADOOP_VERSION", "3.3.4")
-        azure = os.environ.get(
-            "MEDALLION_AZURE_PACKAGES",
-            f"org.apache.hadoop:hadoop-azure:{hv},com.azure:azure-storage-blob:12.25.1",
-        )
-        return f"{delta},{azure}"
-    return delta
+    if not io._use_path_reads():
+        return delta
+    hv = os.environ.get("MEDALLION_HADOOP_VERSION", "3.3.4")
+    azure = os.environ.get(
+        "MEDALLION_AZURE_PACKAGES",
+        f"org.apache.hadoop:hadoop-azure:{hv},com.azure:azure-storage-blob:12.25.1",
+    )
+    return f"{delta},{azure}"
 
 
 def create_onelake_spark(app_name: str = "Medallion"):
@@ -109,9 +109,11 @@ def _build_spark(app_name: str):
             pass
 
     packages = _spark_jar_packages()
+    builder = SparkSession.builder.appName(app_name)
+    if io._use_path_reads():
+        builder = builder.config("spark.jars", fabric_storage.onelake_cli_token_jar())
     builder = (
-        SparkSession.builder.appName(app_name)
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        builder.config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
         .config(
             "spark.sql.catalog.spark_catalog",
             "org.apache.spark.sql.delta.catalog.DeltaCatalog",
@@ -121,6 +123,8 @@ def _build_spark(app_name: str):
     for k, v in _local_settings().get("spark_extra_config", {}).items():
         builder = builder.config(k, v)
     spark = builder.getOrCreate()
+    if io._use_path_reads():
+        fabric_storage.apply_azure_cli_abfs_conf(spark)
     spark.range(1).count()
     return spark, packages
 
@@ -160,36 +164,25 @@ def show_sample(df, n: int = 10) -> None:
 def _ensure_onelake_read_deps() -> None:
     if not io._use_path_reads():
         return
-    if os.environ.get("MEDALLION_SPARK_DELTA_READ", "").lower() in ("1", "true", "yes"):
-        return
     missing: list[str] = []
-    try:
-        import deltalake  # noqa: F401
-    except ImportError:
-        missing.append("deltalake")
     try:
         import azure.identity  # noqa: F401
     except ImportError:
         missing.append("azure-identity")
     try:
-        import pyarrow  # noqa: F401
-    except ImportError:
-        missing.append("pyarrow")
-    try:
-        import pandas  # noqa: F401
-    except ImportError:
-        missing.append("pandas")
-    if not missing:
-        return
-    req = Path(__file__).resolve().parent.parent / "requirements-local-spark.txt"
-    raise RuntimeError(
-        "OneLake read_table() needs deltalake[pyarrow] + azure-identity (NB_Cursor_Bronze).\n"
-        f"Missing: {', '.join(missing)}\n"
-        f"Python: {sys.executable}\n"
-        f"  python -m pip install \"deltalake[pyarrow]\" azure-identity pandas pyarrow\n"
-        f"Or: python -m pip install -r {req}\n"
-        "Then restart the Jupyter kernel and re-run bootstrap."
-    )
+        fabric_storage.onelake_cli_token_jar()
+    except FileNotFoundError:
+        missing.append("common/jars/onelake-cli-token-provider.jar")
+    if missing:
+        req = Path(__file__).resolve().parent.parent / "requirements-local-spark.txt"
+        raise RuntimeError(
+            "Local OneLake reads use PySpark Delta on abfss (az login).\n"
+            f"Missing: {', '.join(missing)}\n"
+            f"Python: {sys.executable}\n"
+            f"  python -m pip install azure-identity\n"
+            f"  python -m pip install -r {req}\n"
+            "Then restart the Jupyter kernel and re-run bootstrap."
+        )
 
 
 def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion") -> None:
@@ -221,9 +214,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     import pyspark
 
     read_mode = (
-        "spark-delta"
-        if os.environ.get("MEDALLION_SPARK_DELTA_READ", "").lower() in ("1", "true", "yes")
-        else "azure-cli+deltalake"
+        "deltalake-fallback"
+        if os.environ.get("MEDALLION_DELTALAKE_READ", "").lower() in ("1", "true", "yes")
+        else "pyspark-delta-abfss"
     )
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "
@@ -233,8 +226,8 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     jars = info.get("jar_packages")
     if jars:
         print(f"spark.jars.packages={jars}")
-    if io._use_path_reads() and read_mode == "azure-cli+deltalake":
-        print("OneLake reads: az login + AzureCliCredential (see NB_Cursor_Bronze.ipynb).")
+    if io._use_path_reads() and read_mode == "pyspark-delta-abfss":
+        print("OneLake reads: az login + spark.read.format('delta').load(abfss://...).")
         cursor_path = io.delta_path_for_table(config.TABLE_CURSOR_BRONZE)
         if cursor_path:
             print(f"TABLE_CURSOR_BRONZE -> {cursor_path}")

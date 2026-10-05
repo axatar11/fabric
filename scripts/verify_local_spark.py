@@ -68,27 +68,19 @@ def main() -> int:
         return 1
 
     try:
-        import setuptools  # noqa: F401 — distutils shim for PySpark+pandas on 3.12
+        __import__("azure.identity")
     except ImportError as exc:
-        print("FAIL missing setuptools (distutils shim):", exc)
+        print("FAIL missing azure-identity:", exc)
         print(f"  python -m pip install -r {REPO / 'requirements-local-spark.txt'}")
         return 1
 
-    for pkg, import_name in (
-        ("deltalake", "deltalake"),
-        ("azure-identity", "azure.identity"),
-        ("pandas", "pandas"),
-        ("pyarrow", "pyarrow"),
-    ):
-        try:
-            __import__(import_name)
-        except ImportError as exc:
-            print(f"FAIL missing {pkg}:", exc)
-            print(f"  python -m pip install -r {REPO / 'requirements-local-spark.txt'}")
-            return 1
+    token_jar = REPO / "common" / "jars" / "onelake-cli-token-provider.jar"
+    if not token_jar.is_file():
+        print("FAIL missing", token_jar)
+        return 1
 
     print(
-        "OK — PySpark + OneLake read deps (deltalake, azure-identity). "
+        "OK — PySpark + azure-identity + OneLake token JAR. "
         "Run az login, then %run ./common/bootstrap"
     )
     return 0
