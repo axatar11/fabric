@@ -34,10 +34,20 @@ py -3.12 -m venv .venv
 pip install -r requirements-local-spark.txt
 ```
 
-Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversableOnce` / `scala.collection.*` errors, pip PySpark and `SPARK_HOME` versions do not match, or `spark.jars.packages` pulled the wrong Delta build. Fix:
+Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversableOnce` / `scala.collection.*` on `spark.table`:
 
-- `pip install pyspark==3.5.4 delta-spark==3.2.0`, and set `SPARK_HOME` to Spark 3.5, **or**
-- Put your session in `common/local_settings.py` → `create_spark()` (no default Maven packages).
+1. **Version mix** — pip PySpark 4.x with `SPARK_HOME` Spark 3.x (or the reverse). Fix:
+   ```powershell
+   pip install pyspark==3.5.4 delta-spark==3.2.0
+   Remove-Item Env:SPARK_HOME -ErrorAction SilentlyContinue
+   ```
+   Or set `MEDALLION_USE_SPARK_HOME=1` only when both versions match.
+
+2. **Stale session** — restart kernel, or before bootstrap: `$env:MEDALLION_FRESH_SPARK = "1"`.
+
+3. **Reads** — locally we default to `read_table()` (Delta path on OneLake), not `spark.table()`, to avoid a broken local metastore. Check bootstrap output: `path_reads=True`.
+
+Run `python scripts/verify_local_spark.py` in your venv to sanity-check Spark before opening a notebook.
 
 Open `NB_CursorUsage_Bronze_To_Silver.ipynb` → Run All.
 

@@ -26,7 +26,9 @@ def date_from_yyyymm(month_no_col: Column) -> Column:
 
 
 def load_country_lookup(spark, country_table: str) -> DataFrame:
-    return spark.table(country_table).select(
+    from common.io import read_table
+
+    return read_table(spark, country_table).select(
         F.col("Country").alias("_country_key"),
         F.col("DisplayName").alias("_country_display"),
     )
