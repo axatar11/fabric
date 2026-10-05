@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Generate NB_Medallion_Local_Pipeline.ipynb from existing Fabric notebooks."""
+"""Generate NB_Medallion_Local_Pipeline.ipynb from existing Fabric notebooks.
+
+This script only writes/updates the .ipynb file. It does NOT start Spark or
+run the medallion pipeline. To execute the pipeline, open the generated notebook
+in Jupyter/VS Code and run all cells (see README.md).
+"""
 from __future__ import annotations
 
 import json
@@ -295,10 +300,12 @@ def main() -> None:
                 """
                 # Medallion reporting pipeline (local Spark → Fabric OneLake)
 
-                Single notebook equivalent to `NB_Medallion_Reporting_Pipeline` plus inlined
-                `common_bootstrap` / `medallion_*` helpers.
+                **How to run:** set `FABRIC_TENANT_ID`, `FABRIC_CLIENT_ID`, `FABRIC_CLIENT_SECRET`
+                (PowerShell: `$env:FABRIC_TENANT_ID = "..."`) or edit **local_spark_session**, then
+                **Run All** in Jupyter or VS Code. Do not use `build_local_pipeline_notebook.py` to execute
+                the pipeline—that script only rebuilds this file from the split notebooks.
 
-                **Pipeline:** HC → Okta → Cursor usage (Silver) → Fact Cursor Active (Gold)
+                **Pipeline order:** HC → Okta → Cursor usage (Silver) → Fact Cursor Active (Gold)
 
                 Each code cell starts with `# Cell: <name>` and has matching markdown headers.
                 """
@@ -341,6 +348,7 @@ def main() -> None:
 
     OUT.write_text(json.dumps(notebook, indent=2))
     print(f"Wrote {OUT} ({len(cells)} cells)")
+    print("Next: open that notebook in Jupyter/VS Code and Run All (see README.md).")
 
 
 if __name__ == "__main__":
