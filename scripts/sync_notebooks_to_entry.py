@@ -86,21 +86,22 @@ def clean_cursor_notebook(nb: dict) -> None:
             continue
         if "drop table" in src.lower():
             continue
-        if src.strip().startswith("# team-usage-events"):
-            cell["source"] = [
-                line + "\n"
-                for line in (
-                    "bronze_df = spark.table(TABLE_CURSOR_BRONZE)\n"
-                    "if CURSOR_BRONZE_FILENAME:\n"
-                    '    bronze_df = bronze_df.filter(F.col("filename") == CURSOR_BRONZE_FILENAME)\n'
-                    "bronze = bronze_df\n"
-                    "\n"
-                    "okta = spark.table(TABLE_OKTA_SILVER)\n"
-                    "hc = spark.table(TABLE_HC_SILVER)\n"
-                    "\n"
-                    'user_norm = F.lower(F.trim(F.col("User")))\n'
-                )
-            ]
+        if src.strip().startswith("# team-usage-events") or (
+            "TABLE_CURSOR_BRONZE" in src and "user_norm" in src and len(src) > 400
+        ):
+            block = (
+                "bronze_df = spark.table(TABLE_CURSOR_BRONZE)\n"
+                "if CURSOR_BRONZE_FILENAME:\n"
+                '    bronze_df = bronze_df.filter(F.col("filename") == CURSOR_BRONZE_FILENAME)\n'
+                "bronze = bronze_df\n"
+                "\n"
+                "okta = spark.table(TABLE_OKTA_SILVER)\n"
+                "hc = spark.table(TABLE_HC_SILVER)\n"
+                "\n"
+                'user_norm = F.lower(F.trim(F.col("User")))\n'
+            )
+            cell["source"] = [line + "\n" for line in block.splitlines()]
+            cell["metadata"] = {"name": "load_bronze_sources"}
         if "merge_incremental" in src and "write_df" in src:
             if any(
                 "merge_incremental" in "".join(c.get("source", []))
