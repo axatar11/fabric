@@ -171,14 +171,22 @@ def _ensure_onelake_read_deps() -> None:
         import azure.identity  # noqa: F401
     except ImportError:
         missing.append("azure-identity")
+    try:
+        import pyarrow  # noqa: F401
+    except ImportError:
+        missing.append("pyarrow")
+    try:
+        import pandas  # noqa: F401
+    except ImportError:
+        missing.append("pandas")
     if not missing:
         return
     req = Path(__file__).resolve().parent.parent / "requirements-local-spark.txt"
     raise RuntimeError(
-        "OneLake read_table() needs deltalake + azure-identity (same as NB_Cursor_Bronze).\n"
+        "OneLake read_table() needs deltalake[pyarrow] + azure-identity (NB_Cursor_Bronze).\n"
         f"Missing: {', '.join(missing)}\n"
         f"Python: {sys.executable}\n"
-        f"  python -m pip install deltalake azure-identity pandas pyarrow\n"
+        f"  python -m pip install \"deltalake[pyarrow]\" azure-identity pandas pyarrow\n"
         f"Or: python -m pip install -r {req}\n"
         "Then restart the Jupyter kernel and re-run bootstrap."
     )
