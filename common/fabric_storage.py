@@ -84,9 +84,10 @@ def apply_azure_cli_abfs_conf(spark) -> None:
 
 
 def fabric_storage_options() -> dict[str, Any]:
-    """Token for deltalake (optional / NB_Cursor_Bronze only)."""
-    access_token, _ = azure_cli_access_token()
+    """Fresh Azure CLI token for deltalake / OneLake (call again before each table read)."""
+    access_token, expires_on = azure_cli_access_token()
     return {
         "bearer_token": access_token,
         "use_fabric_endpoint": "true",
+        "token_expires_on": str(expires_on),
     }

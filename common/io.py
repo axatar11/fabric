@@ -91,6 +91,26 @@ def _read_debug(msg: str) -> None:
         print(msg, flush=True)
 
 
+def _scan_retriable_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(
+        token in msg
+        for token in (
+            "microsoftazure",
+            "http error",
+            "body error",
+            "connection",
+            "timeout",
+            "timed out",
+            "401",
+            "403",
+            "503",
+            "reset",
+            "broken pipe",
+        )
+    )
+
+
 def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]:
     """Convert deltalake ``scan()`` RecordBatchReader to a Spark DataFrame."""
     import pandas as pd
@@ -98,8 +118,12 @@ def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]
     columns: dict[str, list] = {}
     column_order: list[str] | None = None
     row_count = 0
+    next_progress = 50_000
     for batch in reader:
         row_count += batch.num_rows
+        if row_count >= next_progress:
+            _read_debug(f"read_table: scan ... {row_count} rows streamed")
+            next_progress += 50_000
         if column_order is None:
             column_order = list(batch.column_names)
             columns = {name: [] for name in column_order}
@@ -113,17 +137,36 @@ def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]
 
 def _read_delta_via_deltalake_scan(spark: SparkSession, path: str) -> DataFrame:
     """Azure CLI + deltalake DataFusion scan (column mapping / deletion vectors) -> Spark."""
+    import time
+
     from deltalake import DeltaTable
 
-    from common.fabric_storage import fabric_storage_options
+    from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
-    _read_debug(f"read_table: deltalake scan {path}")
-    dt = DeltaTable(path, storage_options=fabric_storage_options())
-    _read_debug("read_table: deltalake scan() streaming batches...")
-    reader = dt.scan()
-    df, row_count = _scan_batches_to_spark(spark, reader)
-    _read_debug(f"read_table: scan -> Spark ({row_count} rows)")
-    return df
+    max_retries = max(1, int(os.environ.get("MEDALLION_SCAN_RETRIES", "4")))
+    last_error: BaseException | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            refresh_abfs_token_env()
+            opts = fabric_storage_options()
+            _read_debug(f"read_table: deltalake scan {path} (attempt {attempt}/{max_retries})")
+            dt = DeltaTable(path, storage_options=opts)
+            _read_debug("read_table: deltalake scan() streaming batches...")
+            reader = dt.scan()
+            df, row_count = _scan_batches_to_spark(spark, reader)
+            _read_debug(f"read_table: scan -> Spark ({row_count} rows)")
+            return df
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max_retries or not _scan_retriable_error(exc):
+                raise
+            wait = min(2**attempt, 15)
+            _read_debug(
+                f"read_table: scan failed ({exc!s}); refresh token and retry in {wait}s..."
+            )
+            time.sleep(wait)
+    assert last_error is not None
+    raise last_error
 
 
 def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
