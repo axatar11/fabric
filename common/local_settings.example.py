@@ -1,10 +1,13 @@
-# Copy to common/local_settings.py (gitignored). Put your working Fabric Spark setup here.
+# Copy to common/local_settings.py (gitignored).
+
+from common.bootstrap import create_onelake_spark
 
 
 def create_spark(app_name: str = "MedallionLocal"):
-    """Return SparkSession already configured for Fabric OneLake."""
-    raise NotImplementedError("Paste your working spark session code here")
+    """SparkSession for Fabric OneLake (Delta + abfss JARs + OAuth from env)."""
+    return create_onelake_spark(app_name)
 
 
 SPARK_EXTRA_CONFIG = {}
+# Optional: TABLE_FQN -> full abfss://.../Tables/... path
 ONELAKE_TABLE_OVERRIDES = {}

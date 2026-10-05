@@ -69,11 +69,21 @@ def _prepare_pyspark_env() -> None:
             )
         else:
             print(
-                f"Unsetting SPARK_HOME ({home_ver}) — pip pyspark is {pyspark.__version__}. "
+                f"Unsetting SPARK_HOME ({home_ver}); pip pyspark is {pyspark.__version__}. "
                 "Set MEDALLION_USE_SPARK_HOME=1 to force SPARK_HOME."
             )
             os.environ.pop("SPARK_HOME", None)
             os.environ.pop("PYSPARK_PYTHON", None)
+
+
+def _onelake_jar_packages() -> str:
+    """Delta + Hadoop Azure (required for abfss:// OneLake paths)."""
+    azure = os.environ.get(
+        "MEDALLION_AZURE_PACKAGES",
+        "org.apache.hadoop:hadoop-azure:3.3.6,com.azure:azure-storage-blob:12.25.1",
+    )
+    delta = os.environ.get("MEDALLION_DELTA_PACKAGES", "io.delta:delta-spark_2.12:3.2.0")
+    return f"{delta},{azure}"
 
 
 def _configure_onelake(builder):
@@ -97,6 +107,30 @@ def _configure_onelake(builder):
     )
 
 
+def _apply_onelake_spark_conf(spark) -> None:
+    host = config.ONELAKE_HOST
+    tenant = os.environ.get("FABRIC_TENANT_ID", "")
+    client_id = os.environ.get("FABRIC_CLIENT_ID", "")
+    client_secret = os.environ.get("FABRIC_CLIENT_SECRET", "")
+    p = "fs.azure.account"
+    spark.conf.set(f"{p}.auth.type.{host}", "OAuth")
+    spark.conf.set(
+        f"{p}.oauth.provider.type.{host}",
+        "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
+    )
+    spark.conf.set(f"{p}.oauth2.client.id.{host}", client_id)
+    spark.conf.set(f"{p}.oauth2.client.secret.{host}", client_secret)
+    spark.conf.set(
+        f"{p}.oauth2.client.endpoint.{host}",
+        f"https://login.microsoftonline.com/{tenant}/oauth2/token",
+    )
+
+
+def create_onelake_spark(app_name: str = "Medallion"):
+    """Local Spark with Delta + Hadoop Azure (abfss) + OneLake OAuth env vars."""
+    return _build_spark(app_name)
+
+
 def _build_spark(app_name: str):
     _prepare_pyspark_env()
     from pyspark.sql import SparkSession
@@ -107,32 +141,21 @@ def _build_spark(app_name: str):
         except Exception:
             pass
 
-    builder = SparkSession.builder.appName(app_name)
-    major = int(__import__("pyspark").__version__.split(".")[0])
-    if major >= 4:
-        if os.environ.get("MEDALLION_FORCE_MAVEN_PACKAGES") == "1":
-            packages = os.environ.get(
-                "MEDALLION_SPARK_PACKAGES",
-                "io.delta:delta-spark_2.13:4.0.0,org.apache.hadoop:hadoop-azure:3.4.1",
-            )
-            builder = builder.config("spark.jars.packages", packages)
-    else:
-        try:
-            from delta import configure_spark_with_delta_pip
-
-            builder = configure_spark_with_delta_pip(builder)
-        except ImportError:
-            pass
-        if os.environ.get("MEDALLION_FORCE_MAVEN_PACKAGES") == "1":
-            builder = builder.config(
-                "spark.jars.packages",
-                "org.apache.hadoop:hadoop-azure:3.3.6,com.azure:azure-storage-blob:12.25.1",
-            )
-
+    packages = os.environ.get("MEDALLION_SPARK_PACKAGES") or _onelake_jar_packages()
+    builder = (
+        SparkSession.builder.appName(app_name)
+        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config(
+            "spark.sql.catalog.spark_catalog",
+            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+        )
+        .config("spark.jars.packages", packages)
+    )
     builder = _configure_onelake(builder)
     for k, v in _local_settings().get("spark_extra_config", {}).items():
         builder = builder.config(k, v)
     spark = builder.getOrCreate()
+    _apply_onelake_spark_conf(spark)
     spark.range(1).count()
     return spark
 
@@ -148,7 +171,9 @@ def _get_spark(notebook_globals: dict[str, Any], app_name: str):
     settings = _local_settings()
     create = settings.get("create_spark")
     if callable(create):
-        return create(app_name), {"runtime": "local", "mode": "custom"}
+        spark = create(app_name)
+        _apply_onelake_spark_conf(spark)
+        return spark, {"runtime": "local", "mode": "custom"}
     rt = _runtime()
     if rt in ("fabric", "databricks"):
         from pyspark.sql import SparkSession
@@ -196,6 +221,12 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         f"spark={spark.version} pyspark={pyspark.__version__} "
         f"path_reads={io._use_path_reads()}"
     )
+    if io._use_path_reads() and info.get("mode") in ("attached", "custom"):
+        print(
+            "OneLake abfss reads need hadoop-azure on this Spark session. "
+            "Use create_onelake_spark in local_settings, or restart kernel / "
+            "MEDALLION_FRESH_SPARK=1 if you see SecureAzureBlobFileSystem errors."
+        )
 
 
 init_notebook(globals())
