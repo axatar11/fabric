@@ -11,7 +11,7 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from common import config, io, transforms
+from common import auth, config, io, transforms
 
 
 def _local_settings() -> dict[str, Any]:
@@ -103,10 +103,11 @@ def _onelake_jar_packages() -> str:
 
 
 def _configure_onelake(builder):
+    creds = auth.sync_fabric_credentials_to_env()
     host = config.ONELAKE_HOST
-    tenant = os.environ.get("FABRIC_TENANT_ID", "")
-    client_id = os.environ.get("FABRIC_CLIENT_ID", "")
-    client_secret = os.environ.get("FABRIC_CLIENT_SECRET", "")
+    tenant = creds.tenant_id
+    client_id = creds.client_id
+    client_secret = creds.client_secret
     p = "fs.azure.account"
     return (
         builder.config(f"{p}.auth.type.{host}", "OAuth")
@@ -124,10 +125,11 @@ def _configure_onelake(builder):
 
 
 def _apply_onelake_spark_conf(spark) -> None:
+    creds = auth.sync_fabric_credentials_to_env()
     host = config.ONELAKE_HOST
-    tenant = os.environ.get("FABRIC_TENANT_ID", "")
-    client_id = os.environ.get("FABRIC_CLIENT_ID", "")
-    client_secret = os.environ.get("FABRIC_CLIENT_SECRET", "")
+    tenant = creds.tenant_id
+    client_id = creds.client_id
+    client_secret = creds.client_secret
     p = "fs.azure.account"
     spark.conf.set(f"{p}.auth.type.{host}", "OAuth")
     spark.conf.set(
@@ -149,6 +151,8 @@ def create_onelake_spark(app_name: str = "Medallion"):
 
 
 def _build_spark(app_name: str):
+    if io._use_path_reads():
+        auth.require_fabric_credentials()
     _prepare_pyspark_env()
     from pyspark.sql import SparkSession
 
@@ -189,6 +193,8 @@ def _get_spark(notebook_globals: dict[str, Any], app_name: str):
     settings = _local_settings()
     create = settings.get("create_spark")
     if callable(create):
+        if io._use_path_reads():
+            auth.require_fabric_credentials()
         spark = create(app_name)
         _apply_onelake_spark_conf(spark)
         return spark, {"runtime": "local", "mode": "custom"}
@@ -241,10 +247,17 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     import pyspark
 
     hv = info.get("hadoop_version") or _hadoop_version()
+    creds = auth.load_fabric_credentials()
+    auth_line = ""
+    if io._use_path_reads():
+        if creds.missing():
+            auth_line = " onelake_auth=MISSING"
+        else:
+            auth_line = f" onelake_auth=ok tenant={creds.tenant_id[:8]}..."
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "
         f"spark={spark.version} pyspark={pyspark.__version__} "
-        f"hadoop_azure={hv} path_reads={io._use_path_reads()}"
+        f"hadoop_azure={hv} path_reads={io._use_path_reads()}{auth_line}"
     )
     jars = info.get("jar_packages")
     if jars and io._use_path_reads():

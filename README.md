@@ -17,7 +17,15 @@ That loads **`common/`** only:
 | `io.py` | Delta overwrite + merge |
 | `transforms.py` | Shared column logic |
 
-**Local OneLake:** set `FABRIC_TENANT_ID`, `FABRIC_CLIENT_ID`, and `FABRIC_CLIENT_SECRET` (service principal with lake access). Bootstrap pulls **Delta + hadoop-azure** via Maven for `abfss://` reads.
+**Local OneLake:** service principal with workspace/lake access. Set credentials in **`common/local_settings.py`** (recommended for Jupyter), a repo **`.env`**, or env vars in the **same** shell that starts Jupyter:
+
+```powershell
+$env:FABRIC_TENANT_ID = "<tenant-guid>"
+$env:FABRIC_CLIENT_ID = "<app-client-id>"
+$env:FABRIC_CLIENT_SECRET = "<secret>"
+```
+
+Aliases: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`. Bootstrap pulls **Delta + hadoop-azure** via Maven for `abfss://` reads.
 
 **Local Spark (recommended):** copy `common/local_settings.example.py` → `common/local_settings.py` (delegates to `create_onelake_spark`). Only replace `create_spark()` if you need extra config; keep `spark.jars.packages` including hadoop-azure.
 
@@ -65,6 +73,8 @@ Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversa
    Restart the Jupyter kernel, re-run bootstrap, or use `create_onelake_spark` from `local_settings.example.py`.
 
 5. **`WeakReferenceMap` / `NoClassDefFoundError`** — **hadoop-azure** version is newer than Spark's bundled **hadoop-common** (common if `MEDALLION_AZURE_PACKAGES` pins 3.3.6). Bootstrap defaults **hadoop-azure 3.3.4** for PySpark 3.5.x; override with `MEDALLION_HADOOP_VERSION` only if it matches your Spark Hadoop build. Then `MEDALLION_FRESH_SPARK=1` and restart the kernel.
+
+6. **`login.microsoftonline.com//oauth2/token` / Auth failure** — **`FABRIC_TENANT_ID` is empty** (double slash in the URL). Jupyter often does not see vars set in another PowerShell window. Put tenant/client/secret in `local_settings.py` or `.env`, restart kernel, re-run bootstrap (`onelake_auth=ok` in the banner).
 
 Run `python scripts/verify_local_spark.py` in your venv to sanity-check Spark before opening a notebook.
 
