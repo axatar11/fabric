@@ -37,16 +37,17 @@ public class EnvAccessTokenProvider implements CustomTokenProviderAdaptee {
 
   private void loadToken() throws IOException {
     String env = System.getenv("ONELAKE_ABFS_ACCESS_TOKEN");
-    if (env != null && !env.isBlank()) {
+    if (env != null && !env.trim().isEmpty()) {
       token = env.trim();
     }
     String file = System.getenv("ONELAKE_ABFS_TOKEN_FILE");
-    if ((token == null || token.isEmpty()) && file != null && !file.isBlank()) {
-      token = Files.readString(Paths.get(file)).trim();
+    if ((token == null || token.isEmpty()) && file != null && !file.trim().isEmpty()) {
+      token = new String(Files.readAllBytes(Paths.get(file)), java.nio.charset.StandardCharsets.UTF_8)
+          .trim();
     }
     String exp = System.getenv("ONELAKE_ABFS_TOKEN_EXPIRY");
     expiryEpochSec = 0;
-    if (exp != null && !exp.isBlank()) {
+    if (exp != null && !exp.trim().isEmpty()) {
       try {
         expiryEpochSec = Long.parseLong(exp.trim());
       } catch (NumberFormatException ignored) {
