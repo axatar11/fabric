@@ -10,9 +10,13 @@ if TYPE_CHECKING:
 
 
 def onelake_table_path(lakehouse_id: str, *subpath: str) -> str:
-    base = (
-        f"abfss://{WORKSPACEID}@{ONELAKE_HOST}/{lakehouse_id}.Lakehouse/Tables"
-    )
+    """Same abfss layout as NB_Cursor_Bronze (guid/Tables/..., no .Lakehouse suffix)."""
+    suffix = ".Lakehouse" if os.environ.get("ONELAKE_LAKEHOUSE_SUFFIX", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ) else ""
+    base = f"abfss://{WORKSPACEID}@{ONELAKE_HOST}/{lakehouse_id}{suffix}/Tables"
     return "/".join([base, *subpath])
 
 
