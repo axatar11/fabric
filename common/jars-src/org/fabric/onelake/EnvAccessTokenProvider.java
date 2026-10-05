@@ -7,13 +7,19 @@ import java.util.Date;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.azurebfs.extensions.CustomTokenProviderAdaptee;
 
-/** Reads Azure CLI token from env (set by common.fabric_storage before Spark reads). */
+/** Azure CLI token for abfss (Python sets Hadoop conf + ~/.fabric/onelake_abfs_token). */
 public class EnvAccessTokenProvider implements CustomTokenProviderAdaptee {
+  static final String CONF_ACCESS_TOKEN = "org.fabric.onelake.access.token";
+  static final String CONF_TOKEN_FILE = "org.fabric.onelake.token.file";
+  static final String CONF_TOKEN_EXPIRY = "org.fabric.onelake.token.expiry";
+
+  private Configuration hadoopConf;
   private String token = "";
   private long expiryEpochSec;
 
   @Override
   public void initialize(Configuration configuration, String accountName) throws IOException {
+    this.hadoopConf = configuration;
     loadToken();
   }
 
@@ -22,7 +28,9 @@ public class EnvAccessTokenProvider implements CustomTokenProviderAdaptee {
     loadToken();
     if (token == null || token.isEmpty()) {
       throw new IOException(
-          "ONELAKE_ABFS_ACCESS_TOKEN is empty. Run az login, then re-run bootstrap.");
+          "OneLake ABFS token missing. Run az login, re-run bootstrap, then read_table(). "
+              + "Expected token file: "
+              + defaultTokenCachePath());
     }
     return token;
   }
@@ -36,23 +44,61 @@ public class EnvAccessTokenProvider implements CustomTokenProviderAdaptee {
   }
 
   private void loadToken() throws IOException {
-    String env = System.getenv("ONELAKE_ABFS_ACCESS_TOKEN");
-    if (env != null && !env.trim().isEmpty()) {
-      token = env.trim();
-    }
-    String file = System.getenv("ONELAKE_ABFS_TOKEN_FILE");
-    if ((token == null || token.isEmpty()) && file != null && !file.trim().isEmpty()) {
-      token = new String(Files.readAllBytes(Paths.get(file)), java.nio.charset.StandardCharsets.UTF_8)
-          .trim();
-    }
-    String exp = System.getenv("ONELAKE_ABFS_TOKEN_EXPIRY");
+    token = "";
     expiryEpochSec = 0;
-    if (exp != null && !exp.trim().isEmpty()) {
-      try {
-        expiryEpochSec = Long.parseLong(exp.trim());
-      } catch (NumberFormatException ignored) {
-        expiryEpochSec = 0;
+
+    if (hadoopConf != null) {
+      token = trimOrEmpty(hadoopConf.get(CONF_ACCESS_TOKEN));
+      expiryEpochSec = parseExpiry(hadoopConf.get(CONF_TOKEN_EXPIRY));
+      if (token.isEmpty()) {
+        token = readTokenFile(trimOrEmpty(hadoopConf.get(CONF_TOKEN_FILE)));
       }
     }
+
+    if (token.isEmpty()) {
+      token = readTokenFile(defaultTokenCachePath());
+    }
+
+    if (token.isEmpty()) {
+      token = trimOrEmpty(System.getenv("ONELAKE_ABFS_ACCESS_TOKEN"));
+    }
+    if (token.isEmpty()) {
+      token = readTokenFile(trimOrEmpty(System.getenv("ONELAKE_ABFS_TOKEN_FILE")));
+    }
+
+    if (expiryEpochSec <= 0) {
+      expiryEpochSec = parseExpiry(System.getenv("ONELAKE_ABFS_TOKEN_EXPIRY"));
+    }
+  }
+
+  private static String defaultTokenCachePath() {
+    return Paths.get(System.getProperty("user.home"), ".fabric", "onelake_abfs_token")
+        .toString();
+  }
+
+  private static String trimOrEmpty(String value) {
+    return value == null ? "" : value.trim();
+  }
+
+  private static long parseExpiry(String value) {
+    if (value == null || value.trim().isEmpty()) {
+      return 0;
+    }
+    try {
+      return Long.parseLong(value.trim());
+    } catch (NumberFormatException ignored) {
+      return 0;
+    }
+  }
+
+  private static String readTokenFile(String path) throws IOException {
+    if (path == null || path.isEmpty()) {
+      return "";
+    }
+    java.nio.file.Path p = Paths.get(path);
+    if (!Files.isRegularFile(p)) {
+      return "";
+    }
+    return new String(Files.readAllBytes(p), java.nio.charset.StandardCharsets.UTF_8).trim();
   }
 }

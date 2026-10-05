@@ -109,6 +109,8 @@ def _build_spark(app_name: str):
             pass
 
     packages = _spark_jar_packages()
+    if io._use_path_reads():
+        fabric_storage.refresh_abfs_token_env()
     builder = SparkSession.builder.appName(app_name)
     if io._use_path_reads():
         builder = builder.config("spark.jars", fabric_storage.onelake_cli_token_jar())
@@ -134,6 +136,8 @@ def _get_spark(notebook_globals: dict[str, Any], app_name: str):
     if existing is not None and os.environ.get("MEDALLION_FRESH_SPARK") != "1":
         try:
             existing.sparkContext
+            if io._use_path_reads():
+                fabric_storage.apply_azure_cli_abfs_conf(existing)
             return existing, {"runtime": _runtime(), "mode": "attached"}
         except Exception:
             pass
