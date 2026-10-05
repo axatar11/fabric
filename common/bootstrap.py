@@ -222,7 +222,12 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
 
     import pyspark
 
-    read_mode = "deltalake-only" if io._use_deltalake_read() else "pyspark-delta-load"
+    if io._use_deltalake_read():
+        read_mode = "deltalake-to_pandas"
+    elif os.environ.get("MEDALLION_PYSPARK_ABFSS_READ", "").lower() in ("1", "true", "yes"):
+        read_mode = "pyspark-delta-load"
+    else:
+        read_mode = "deltalake-scan"
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "
         f"spark={spark.version} pyspark={pyspark.__version__} "
@@ -232,12 +237,17 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     if jars:
         print(f"spark.jars.packages={jars}")
     if io._use_path_reads():
-        if read_mode == "deltalake-only":
-            print("OneLake reads: deltalake only (may show NaN on column-mapped tables).")
+        if read_mode == "deltalake-scan":
+            print(
+                "OneLake reads: deltalake scan() + az login -> Spark "
+                "(column mapping; avoids local PySpark abfss hang)."
+            )
+        elif read_mode == "deltalake-to_pandas":
+            print("OneLake reads: deltalake to_pandas (may show NaN on column-mapped tables).")
         else:
             print(
-                "OneLake reads: spark.read.format('delta').load(abfss://...) + az login "
-                "(same as Fabric notebooks; use load_delta_path or read_table)."
+                "OneLake reads: spark.read.format('delta').load(abfss://...) "
+                "(can hang locally; prefer default deltalake-scan)."
             )
         cursor_path = io.delta_path_for_table(config.TABLE_CURSOR_BRONZE)
         if cursor_path:

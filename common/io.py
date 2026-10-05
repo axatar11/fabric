@@ -74,49 +74,56 @@ def _use_deltalake_read() -> bool:
     return flag.lower() in ("1", "true", "yes")
 
 
-def _fabric_delta_needs_pyspark(path: str) -> bool:
-    """Fabric Delta often uses column mapping; deltalake then shows NULL/NaN — PySpark reads correctly."""
-    from deltalake import DeltaTable
-
-    from common.fabric_storage import fabric_storage_options
-
-    dt = DeltaTable(path, storage_options=fabric_storage_options())
-    try:
-        meta = dt.metadata()
-        conf = getattr(meta, "configuration", None) or {}
-        mode = str(conf.get("delta.columnMapping.mode", "none")).lower()
-        if mode not in ("none", ""):
-            _read_debug(f"read_table: delta.columnMapping.mode={mode} -> PySpark")
-            return True
-        dv = str(conf.get("delta.enableDeletionVectors", "false")).lower()
-        if dv in ("1", "true", "yes"):
-            _read_debug("read_table: deletion vectors enabled -> PySpark")
-            return True
-    except Exception:
-        pass
-    for field in getattr(dt.schema(), "fields", []) or []:
-        md = getattr(field, "metadata", None) or {}
-        if any(str(k).startswith("delta.columnMapping") for k in md):
-            _read_debug("read_table: schema has column mapping -> PySpark")
-            return True
-    return False
-
-
 def _resolve_read_backend(path: str) -> str:
-    """Default PySpark delta.load (Fabric notebooks); deltalake only when explicitly requested."""
+    """Default deltalake scan (Fabric column mapping, fast). PySpark abfss often hangs locally."""
+    if os.environ.get("MEDALLION_PYSPARK_ABFSS_READ", "").lower() in ("1", "true", "yes"):
+        return "pyspark"
     if _use_deltalake_read():
-        if _fabric_delta_needs_pyspark(path):
-            _read_debug(
-                "read_table: WARNING column-mapped table with MEDALLION_DELTALAKE_READ=1 "
-                "(values may be NaN; use PySpark default instead)"
-            )
+        _read_debug(
+            "read_table: MEDALLION_DELTALAKE_READ=1 uses to_pandas (NaN on column-mapped tables)"
+        )
         return "deltalake"
-    return "pyspark"
+    return "scan"
 
 
 def _read_debug(msg: str) -> None:
     if os.environ.get("MEDALLION_DEBUG_READ", "").lower() in ("1", "true", "yes"):
         print(msg, flush=True)
+
+
+def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]:
+    """Convert deltalake ``scan()`` RecordBatchReader to a Spark DataFrame."""
+    import pandas as pd
+
+    columns: dict[str, list] = {}
+    column_order: list[str] | None = None
+    row_count = 0
+    for batch in reader:
+        row_count += batch.num_rows
+        if column_order is None:
+            column_order = list(batch.column_names)
+            columns = {name: [] for name in column_order}
+        for i, name in enumerate(batch.column_names):
+            columns[name].extend(batch.column(i).to_pylist())
+    if not column_order:
+        return spark.createDataFrame([], schema=None), 0
+    pdf = pd.DataFrame(columns)
+    return spark.createDataFrame(pdf[column_order]), row_count
+
+
+def _read_delta_via_deltalake_scan(spark: SparkSession, path: str) -> DataFrame:
+    """Azure CLI + deltalake DataFusion scan (column mapping / deletion vectors) -> Spark."""
+    from deltalake import DeltaTable
+
+    from common.fabric_storage import fabric_storage_options
+
+    _read_debug(f"read_table: deltalake scan {path}")
+    dt = DeltaTable(path, storage_options=fabric_storage_options())
+    _read_debug("read_table: deltalake scan() streaming batches...")
+    reader = dt.scan()
+    df, row_count = _scan_batches_to_spark(spark, reader)
+    _read_debug(f"read_table: scan -> Spark ({row_count} rows)")
+    return df
 
 
 def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
@@ -135,8 +142,13 @@ def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
 
 
 def load_delta_path(spark: SparkSession, path: str) -> DataFrame:
-    """Local az login + ``spark.read.format('delta').load(path)`` (same as Fabric notebooks)."""
-    return _read_delta_via_pyspark(spark, path)
+    """Read OneLake Delta path locally (same backend selection as ``read_table``)."""
+    backend = _resolve_read_backend(path)
+    if backend == "pyspark":
+        return _read_delta_via_pyspark(spark, path)
+    if backend == "deltalake":
+        return _read_delta_via_deltalake(spark, path)
+    return _read_delta_via_deltalake_scan(spark, path)
 
 
 def _read_delta_via_pyspark(spark: SparkSession, path: str) -> DataFrame:
@@ -154,9 +166,11 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
         if path:
             backend = _resolve_read_backend(path)
             _read_debug(f"read_table: {table_fqn} backend={backend}")
+            if backend == "pyspark":
+                return _read_delta_via_pyspark(spark, path)
             if backend == "deltalake":
                 return _read_delta_via_deltalake(spark, path)
-            return _read_delta_via_pyspark(spark, path)
+            return _read_delta_via_deltalake_scan(spark, path)
     return spark.table(table_fqn)
 
 
