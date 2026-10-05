@@ -72,7 +72,14 @@ def _read_delta_via_azure_cli(spark: SparkSession, path: str) -> DataFrame:
 
     from common.fabric_storage import fabric_storage_options
 
-    dt = DeltaTable(path, storage_options=fabric_storage_options())
+    opts = fabric_storage_options()
+    try:
+        dt = DeltaTable(path, storage_options=opts)
+    except OSError as exc:
+        raise OSError(
+            f"{exc}\nOneLake path used: {path}\n"
+            "(Copy path from Fabric if different; set ONELAKE_TABLE_OVERRIDES in local_settings.py)"
+        ) from exc
     return spark.createDataFrame(dt.to_pandas())
 
 
