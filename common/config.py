@@ -50,6 +50,12 @@ CURSOR_BRONZE_FILENAME = os.environ.get(
 )
 ONELAKE_HOST = "onelake.dfs.fabric.microsoft.com"
 
+# Default abfss paths (Fabric Copy ABFS path); no local_settings.py required.
+ONELAKE_CURSOR_BRONZE_PATH = (
+    f"abfss://{WORKSPACEID}@{ONELAKE_HOST}/"
+    f"{LAKEHOUSE_AI_MEDALLION_ID}/Tables/Bronze/cursor_usage"
+)
+
 CONFIG_NAMES = [
     "WORKSPACEID",
     "LAKEHOUSE_AI_MEDALLION_ID",
