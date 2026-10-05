@@ -1,0 +1,6 @@
+medallion/local_settings.py
+.venv/
+__pycache__/
+common/__pycache__/
+*.pyc
+.ipynb_checkpoints/

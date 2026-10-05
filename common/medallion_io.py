@@ -1,54 +1,19 @@
-#!/usr/bin/env python
-# coding: utf-8
+"""Delta write helpers (re-export from medallion.io + config)."""
 
-# ## medallion_io
-# 
-# New notebook
+from __future__ import annotations
 
-# In[ ]:
+import sys
+from pathlib import Path
 
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
-# The command is not a standard IPython magic command. It is designed for use within Fabric notebooks only.
-# %run medallion_config
+from medallion import config as _cfg
+from medallion import io as _io
 
+for _name in _cfg.__all__:
+    globals()[_name] = getattr(_cfg, _name)
 
-# In[ ]:
-
-
-from pyspark.sql import DataFrame
-
-def write_full_table(df: DataFrame, table_name: str) -> None:
-    """Full load (overwrite) for Silver / dimension-style Gold tables."""
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(table_name)
-    )
-
-
-def merge_incremental(
-    spark,
-    df: DataFrame,
-    table_name: str,
-    merge_key: str,
-) -> None:
-    """Incremental upsert on a single merge key column (Delta Lake)."""
-    if not spark.catalog.tableExists(table_name):
-        write_full_table(df, table_name)
-        return
-
-    from delta.tables import DeltaTable
-
-    target = DeltaTable.forName(spark, table_name)
-    (
-        target.alias("target")
-        .merge(
-            df.alias("source"),
-            f"target.{merge_key} = source.{merge_key}",
-        )
-        .whenMatchedUpdateAll()
-        .whenNotMatchedInsertAll()
-        .execute()
-    )
-
+write_full_table = _io.write_full_table
+merge_incremental = _io.merge_incremental
