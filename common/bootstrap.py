@@ -1,4 +1,4 @@
-"""Notebook entry: `%run ./common/bootstrap` — Spark session + pipeline helpers."""
+"""Notebook entry: `%run ./common/bootstrap`"""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ def _local_settings() -> dict[str, Any]:
 
         out["create_spark"] = getattr(ls, "create_spark", None)
         out["spark_extra_config"] = getattr(ls, "SPARK_EXTRA_CONFIG", {})
-        out["table_path_overrides"] = getattr(ls, "ONELAKE_TABLE_OVERRIDES", {})
     except ImportError:
         pass
     return out
@@ -42,26 +41,39 @@ def _runtime() -> str:
     return "local"
 
 
-def _maven_packages() -> str | None:
-    """Only when not using SPARK_HOME jars — mismatched Delta/Scala causes GenTraversableOnce errors."""
-    if os.environ.get("SPARK_HOME") and os.environ.get("MEDALLION_FORCE_MAVEN_PACKAGES") != "1":
+def _spark_home_version() -> str | None:
+    home = os.environ.get("SPARK_HOME")
+    if not home:
         return None
-    override = os.environ.get("MEDALLION_SPARK_PACKAGES")
-    if override:
-        return override
+    release = Path(home) / "RELEASE"
+    if not release.is_file():
+        return None
+    text = release.read_text(encoding="utf-8", errors="ignore")
+    for token in text.replace("\n", " ").split():
+        if token[0:1].isdigit():
+            return token.split("-")[0]
+    return None
+
+
+def _prepare_pyspark_env() -> None:
+    """Avoid pip PySpark + SPARK_HOME version mix (causes GenTraversableOnce / catalog errors)."""
     import pyspark
 
-    ver = pyspark.__version__.split(".")
-    major = int(ver[0])
-    if major >= 4:
-        delta = os.environ.get("MEDALLION_DELTA_PACKAGES", "io.delta:delta-spark_2.13:4.0.0")
-    else:
-        delta = os.environ.get("MEDALLION_DELTA_PACKAGES", "io.delta:delta-spark_2.12:3.2.0")
-    azure = os.environ.get(
-        "MEDALLION_AZURE_PACKAGES",
-        "org.apache.hadoop:hadoop-azure:3.3.6,com.azure:azure-storage-blob:12.25.1",
-    )
-    return f"{delta},{azure}"
+    pip_ver = pyspark.__version__.split(".")
+    home_ver = _spark_home_version()
+    if home_ver and home_ver.split(".")[0] != pip_ver[0]:
+        if os.environ.get("MEDALLION_USE_SPARK_HOME") == "1":
+            print(
+                f"WARNING: SPARK_HOME={home_ver} but pip pyspark={pyspark.__version__} "
+                "(set MEDALLION_USE_SPARK_HOME only if versions match)"
+            )
+        else:
+            print(
+                f"Unsetting SPARK_HOME ({home_ver}) — pip pyspark is {pyspark.__version__}. "
+                "Set MEDALLION_USE_SPARK_HOME=1 to force SPARK_HOME."
+            )
+            os.environ.pop("SPARK_HOME", None)
+            os.environ.pop("PYSPARK_PYTHON", None)
 
 
 def _configure_onelake(builder):
@@ -86,28 +98,48 @@ def _configure_onelake(builder):
 
 
 def _build_spark(app_name: str):
+    _prepare_pyspark_env()
     from pyspark.sql import SparkSession
 
+    if os.environ.get("MEDALLION_FRESH_SPARK") == "1":
+        try:
+            SparkSession.getActiveSession().stop()  # type: ignore[union-attr]
+        except Exception:
+            pass
+
     builder = SparkSession.builder.appName(app_name)
-    packages = _maven_packages()
-    if packages:
-        builder = (
-            builder.config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-            .config(
-                "spark.sql.catalog.spark_catalog",
-                "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+    major = int(__import__("pyspark").__version__.split(".")[0])
+    if major >= 4:
+        if os.environ.get("MEDALLION_FORCE_MAVEN_PACKAGES") == "1":
+            packages = os.environ.get(
+                "MEDALLION_SPARK_PACKAGES",
+                "io.delta:delta-spark_2.13:4.0.0,org.apache.hadoop:hadoop-azure:3.4.1",
             )
-            .config("spark.jars.packages", packages)
-        )
+            builder = builder.config("spark.jars.packages", packages)
+    else:
+        try:
+            from delta import configure_spark_with_delta_pip
+
+            builder = configure_spark_with_delta_pip(builder)
+        except ImportError:
+            pass
+        if os.environ.get("MEDALLION_FORCE_MAVEN_PACKAGES") == "1":
+            builder = builder.config(
+                "spark.jars.packages",
+                "org.apache.hadoop:hadoop-azure:3.3.6,com.azure:azure-storage-blob:12.25.1",
+            )
+
     builder = _configure_onelake(builder)
     for k, v in _local_settings().get("spark_extra_config", {}).items():
         builder = builder.config(k, v)
-    return builder.getOrCreate()
+    spark = builder.getOrCreate()
+    spark.range(1).count()
+    return spark
 
 
 def _get_spark(notebook_globals: dict[str, Any], app_name: str):
     existing = notebook_globals.get("spark")
-    if existing is not None:
+    if existing is not None and os.environ.get("MEDALLION_FRESH_SPARK") != "1":
         try:
             existing.sparkContext
             return existing, {"runtime": _runtime(), "mode": "attached"}
@@ -125,37 +157,6 @@ def _get_spark(notebook_globals: dict[str, Any], app_name: str):
     return _build_spark(app_name), {"runtime": "local", "mode": "created"}
 
 
-def _register_tables(spark) -> None:
-    if os.environ.get("MEDALLION_REGISTER_TABLES") != "1":
-        return
-    overrides = _local_settings().get("table_path_overrides") or {}
-
-    def root(lakehouse_id: str) -> str:
-        return (
-            f"abfss://{config.WORKSPACEID}@{config.ONELAKE_HOST}/"
-            f"{lakehouse_id}.Lakehouse/Tables"
-        )
-
-    paths = {
-        config.TABLE_CURSOR_BRONZE: f"{root(config.LAKEHOUSE_AI_MEDALLION_ID)}/Bronze/cursor_usage",
-        config.TABLE_HC_BRONZE: f"{root(config.LAKEHOUSE_AI_MEDALLION_BRONZE_ID)}/dbo/HC_Bronze_Historical",
-        config.TABLE_OKTA_BRONZE: f"{root(config.LAKEHOUSE_AI_MEDALLION_BRONZE_ID)}/dbo/CoreOktaUser",
-        config.TABLE_COUNTRY: f"{root(config.LAKEHOUSE_AI_MEDALLION_SILVER_ID)}/dbo/CoreCountry_Excel_Hours_Historic",
-        config.TABLE_HC_SILVER: f"{root(config.LAKEHOUSE_AI_MEDALLION_ID)}/Silver/HC_Silver_Historical",
-        config.TABLE_OKTA_SILVER: f"{root(config.LAKEHOUSE_AI_MEDALLION_ID)}/Silver/Okta_User_for_AI",
-        config.TABLE_CURSOR_SILVER: f"{root(config.LAKEHOUSE_AI_MEDALLION_ID)}/Silver/cursor_usage",
-        config.TABLE_FACT_CURSOR_ACTIVE: f"{root(config.LAKEHOUSE_AI_MEDALLION_ID)}/Gold/Fact_Cursor_Active",
-    }
-    paths.update(overrides)
-    for fqn, abfss in paths.items():
-        try:
-            if spark.catalog.tableExists(fqn):
-                continue
-            spark.sql(f"CREATE TABLE IF NOT EXISTS {fqn} USING DELTA LOCATION '{abfss}'")
-        except Exception as exc:
-            print(f"Skip register {fqn}: {exc}")
-
-
 def show_sample(df, n: int = 10) -> None:
     try:
         display(df.limit(n))  # noqa: F821
@@ -167,11 +168,13 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     from pyspark.sql import functions as F
 
     spark, info = _get_spark(notebook_globals, app_name)
-    _register_tables(spark)
+    read_table = lambda name: io.read_table(spark, name)  # noqa: E731
+
     notebook_globals.update(
         {
             "spark": spark,
             "F": F,
+            "read_table": read_table,
             "write_full_table": io.write_full_table,
             "merge_incremental": io.merge_incremental,
             "trim_lower": transforms.trim_lower,
@@ -185,9 +188,13 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     )
     for name in config.CONFIG_NAMES:
         notebook_globals[name] = getattr(config, name)
+
+    import pyspark
+
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "
-        f"spark={spark.version}"
+        f"spark={spark.version} pyspark={pyspark.__version__} "
+        f"path_reads={io._use_path_reads()}"
     )
 
 
