@@ -111,28 +111,50 @@ def _scan_retriable_error(exc: BaseException) -> bool:
     )
 
 
-def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]:
-    """Convert deltalake ``scan()`` RecordBatchReader to a Spark DataFrame."""
+def _batches_to_pandas(batches) -> "pd.DataFrame":
     import pandas as pd
 
-    columns: dict[str, list] = {}
-    column_order: list[str] | None = None
+    first = batches[0]
+    names = list(first.column_names)
+    columns = {name: [] for name in names}
+    for batch in batches:
+        for i, name in enumerate(batch.column_names):
+            columns[name].extend(batch.column(i).to_pylist())
+    return pd.DataFrame(columns)[names]
+
+
+def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]:
+    """Stream deltalake scan batches into Spark (chunked to limit RAM on large tables)."""
     row_count = 0
     next_progress = 50_000
+    chunk_limit = max(10_000, int(os.environ.get("MEDALLION_SCAN_CHUNK_ROWS", "75000")))
+    pending: list = []
+    pending_rows = 0
+    spark_df: DataFrame | None = None
+
+    def flush_chunk() -> None:
+        nonlocal spark_df, pending, pending_rows
+        if not pending:
+            return
+        part = spark.createDataFrame(_batches_to_pandas(pending))
+        spark_df = part if spark_df is None else spark_df.unionByName(part, allowMissingColumns=True)
+        pending = []
+        pending_rows = 0
+
     for batch in reader:
+        pending.append(batch)
+        pending_rows += batch.num_rows
         row_count += batch.num_rows
         if row_count >= next_progress:
             _read_debug(f"read_table: scan ... {row_count} rows streamed")
             next_progress += 50_000
-        if column_order is None:
-            column_order = list(batch.column_names)
-            columns = {name: [] for name in column_order}
-        for i, name in enumerate(batch.column_names):
-            columns[name].extend(batch.column(i).to_pylist())
-    if not column_order:
+        if pending_rows >= chunk_limit:
+            flush_chunk()
+
+    flush_chunk()
+    if spark_df is None:
         return spark.createDataFrame([], schema=None), 0
-    pdf = pd.DataFrame(columns)
-    return spark.createDataFrame(pdf[column_order]), row_count
+    return spark_df, row_count
 
 
 def _read_delta_via_deltalake_scan(spark: SparkSession, path: str) -> DataFrame:
@@ -143,7 +165,7 @@ def _read_delta_via_deltalake_scan(spark: SparkSession, path: str) -> DataFrame:
 
     from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
-    max_retries = max(1, int(os.environ.get("MEDALLION_SCAN_RETRIES", "4")))
+    max_retries = max(1, int(os.environ.get("MEDALLION_SCAN_RETRIES", "6")))
     last_error: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -205,6 +227,9 @@ def _read_delta_via_pyspark(spark: SparkSession, path: str) -> DataFrame:
 def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
     """Local: PySpark Delta on abfss (az login). Fabric runtime: spark.table."""
     if _use_path_reads():
+        import gc
+
+        gc.collect()
         path = delta_path_for_table(table_fqn)
         if path:
             backend = _resolve_read_backend(path)
