@@ -74,6 +74,13 @@ def apply_azure_cli_abfs_conf(spark) -> None:
     spark.conf.set(f"spark.hadoop.{_HADOOP_CONF_TOKEN}", access_token)
     spark.conf.set(f"spark.hadoop.{_HADOOP_CONF_TOKEN_FILE}", str(cache))
     spark.conf.set(f"spark.hadoop.{_HADOOP_CONF_TOKEN_EXPIRY}", str(expires_on))
+    # Fail faster when ABFS auth/network is wrong (avoid multi-minute silent hangs).
+    for key, val in (
+        ("fs.azure.io.retry.max.retries", "5"),
+        ("fs.azure.io.retry.min.backoff.interval", "3s"),
+        ("fs.azure.io.retry.max.backoff.interval", "15s"),
+    ):
+        spark.conf.set(f"spark.hadoop.{key}", val)
 
 
 def fabric_storage_options() -> dict[str, Any]:
