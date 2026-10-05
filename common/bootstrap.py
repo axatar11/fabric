@@ -204,6 +204,8 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "spark": spark,
             "F": F,
             "read_table": read_table,
+            "load_delta_path": lambda path: io.load_delta_path(spark, path),
+            "bronze_cursor_path": config.ONELAKE_CURSOR_BRONZE_PATH,
             "write_full_table": io.write_full_table,
             "merge_incremental": io.merge_incremental,
             "trim_lower": transforms.trim_lower,
@@ -220,12 +222,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
 
     import pyspark
 
-    if io._use_deltalake_read():
-        read_mode = "deltalake-only"
-    elif os.environ.get("MEDALLION_PYSPARK_ABFSS_READ", "").lower() in ("1", "true", "yes"):
-        read_mode = "pyspark-only"
-    else:
-        read_mode = "auto"
+    read_mode = "deltalake-only" if io._use_deltalake_read() else "pyspark-delta-load"
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "
         f"spark={spark.version} pyspark={pyspark.__version__} "
@@ -235,16 +232,12 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     if jars:
         print(f"spark.jars.packages={jars}")
     if io._use_path_reads():
-        if read_mode == "auto":
-            print(
-                "OneLake reads: auto — PySpark for Fabric column-mapped Delta; "
-                "else deltalake + az login."
-            )
-        elif read_mode == "deltalake-only":
+        if read_mode == "deltalake-only":
             print("OneLake reads: deltalake only (may show NaN on column-mapped tables).")
         else:
             print(
-                "OneLake reads: PySpark spark.read.format('delta').load(abfss://...) + az login."
+                "OneLake reads: spark.read.format('delta').load(abfss://...) + az login "
+                "(same as Fabric notebooks; use load_delta_path or read_table)."
             )
         cursor_path = io.delta_path_for_table(config.TABLE_CURSOR_BRONZE)
         if cursor_path:
