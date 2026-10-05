@@ -7,7 +7,6 @@ if TYPE_CHECKING:
 
 
 def write_full_table(df: DataFrame, table_name: str) -> None:
-    """Full load (overwrite) for Silver / dimension-style Gold tables."""
     (
         df.write.format("delta")
         .mode("overwrite")
@@ -16,26 +15,16 @@ def write_full_table(df: DataFrame, table_name: str) -> None:
     )
 
 
-def merge_incremental(
-    spark,
-    df: DataFrame,
-    table_name: str,
-    merge_key: str,
-) -> None:
-    """Incremental upsert on a single merge key column (Delta Lake)."""
+def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> None:
     if not spark.catalog.tableExists(table_name):
         write_full_table(df, table_name)
         return
-
     from delta.tables import DeltaTable
 
     target = DeltaTable.forName(spark, table_name)
     (
         target.alias("target")
-        .merge(
-            df.alias("source"),
-            f"target.{merge_key} = source.{merge_key}",
-        )
+        .merge(df.alias("source"), f"target.{merge_key} = source.{merge_key}")
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
         .execute()

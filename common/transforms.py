@@ -3,15 +3,11 @@ from __future__ import annotations
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
-from medallion.config import NO_COUNTRY
+from common.config import NO_COUNTRY
 
 
 def trim_lower(col_name: str) -> Column:
     return F.lower(F.trim(F.col(col_name)))
-
-
-def trim_col(col_name: str) -> Column:
-    return F.trim(F.col(col_name))
 
 
 def is_valid_email(col: Column) -> Column:
