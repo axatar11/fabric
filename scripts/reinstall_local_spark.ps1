@@ -1,16 +1,21 @@
-# Delete .venv and recreate it, then install PySpark (cleanest fix for broken packages).
+# Recreates .venv with Python 3.12 (PySpark 3.5 does not support 3.14).
 # Usage: .\reinstall_local_spark.ps1
-#        $env:MEDALLION_PYTHON = "C:\path\to\python312\python.exe"; .\reinstall_local_spark.ps1
-#        .\reinstall_local_spark.ps1 -KeepVenv
 
 param(
-    [switch]$KeepVenv
+    [switch]$KeepVenv,
+    [switch]$SkipAutoInstall
 )
 
 $ErrorActionPreference = "Continue"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Requirements = Join-Path $RepoRoot "requirements-local-spark.txt"
+
+function Refresh-PathEnv {
+    $machine = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = "$machine;$user"
+}
 
 function Test-Python312Or311 {
     param([string]$Exe)
@@ -40,24 +45,30 @@ function Find-BasePython {
         if ($cmd -and (Test-Python312Or311 $cmd.Source)) { return $cmd.Source }
     }
 
-    $programFiles = @(
+    $paths = @(
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
         "$env:ProgramFiles\Python312\python.exe",
         "$env:ProgramFiles\Python311\python.exe"
     )
-    foreach ($p in $programFiles) {
+    foreach ($p in $paths) {
         if (Test-Python312Or311 $p) { return $p }
     }
 
-    if (Test-Path "$env:LOCALAPPDATA\Python") {
-        foreach ($dir in Get-ChildItem "$env:LOCALAPPDATA\Python" -Directory -ErrorAction SilentlyContinue) {
-            $exe = Join-Path $dir.FullName "python.exe"
-            if (Test-Python312Or311 $exe) { return $exe }
-        }
-    }
-
     return $null
+}
+
+function Install-Python312 {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "winget not found. Run: winget install -e --id Python.Python.3.12" -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "Installing Python 3.12 via winget (alongside your 3.14)..."
+    & winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) { return $false }
+    Refresh-PathEnv
+    Start-Sleep -Seconds 3
+    return $true
 }
 
 function Find-VenvRoot {
@@ -74,18 +85,20 @@ function Find-VenvRoot {
 }
 
 $basePython = Find-BasePython
+if (-not $basePython -and -not $SkipAutoInstall) {
+    Install-Python312 | Out-Null
+    $basePython = Find-BasePython
+}
+
 if (-not $basePython) {
-    Write-Host 'ERROR: No Python 3.11 or 3.12 found.' -ForegroundColor Red
-    Write-Host ''
-    Write-Host 'Install Python 3.12 from python.org, or set MEDALLION_PYTHON to python.exe path.'
-    Write-Host '  Example: $env:MEDALLION_PYTHON = C:\Python312\python.exe'
-    Write-Host 'Then run this script again.'
-    Write-Host ''
-    Write-Host 'Python 3.14 is not supported for PySpark 3.5. Install 3.12 alongside it.'
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        Write-Host "Installed py versions:"
-        & py --list 2>$null
-    }
+    Write-Host "ERROR: No Python 3.11 or 3.12 found." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "You only have Python 3.14. PySpark 3.5 needs 3.12 for this venv."
+    Write-Host ""
+    Write-Host "  winget install -e --id Python.Python.3.12"
+    Write-Host '  Close and reopen PowerShell, then: .\reinstall_local_spark.ps1'
+    Write-Host '  Or: $env:MEDALLION_PYTHON = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"'
+    & py --list 2>$null
     exit 1
 }
 
@@ -95,7 +108,6 @@ $py = Join-Path $venvPath "Scripts\python.exe"
 
 Write-Host "Base Python:" $basePython
 Write-Host "Venv root:" $venvRoot
-Write-Host "Requirements:" $Requirements
 
 if (-not $KeepVenv) {
     if (Test-Path $venvPath) {
@@ -110,19 +122,10 @@ if (-not $KeepVenv) {
     exit 1
 }
 
-Write-Host "Venv Python:" $py
 & $py -m pip install --upgrade pip
-if (-not (Test-Path $Requirements)) {
-    Write-Host "ERROR: Missing $Requirements" -ForegroundColor Red
-    exit 1
-}
-Write-Host "Installing from requirements-local-spark.txt..."
 & $py -m pip install -r $Requirements
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Remove-Item Env:SPARK_HOME -ErrorAction SilentlyContinue
-
-$verify = Join-Path $PSScriptRoot "verify_local_spark.py"
-Write-Host "Running verify_local_spark.py..."
-& $py $verify
+& $py (Join-Path $PSScriptRoot "verify_local_spark.py")
 exit $LASTEXITCODE
