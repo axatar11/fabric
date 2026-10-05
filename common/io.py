@@ -66,47 +66,70 @@ def _use_path_reads() -> bool:
     return True
 
 
+def _use_deltalake_read() -> bool:
+    """Default: deltalake + az login (NB_Cursor_Bronze). PySpark abfss often hangs on OneLake."""
+    flag = os.environ.get("MEDALLION_DELTALAKE_READ")
+    if flag is not None:
+        return flag.lower() in ("1", "true", "yes")
+    abfss = os.environ.get("MEDALLION_PYSPARK_ABFSS_READ", "")
+    return abfss.lower() not in ("1", "true", "yes")
+
+
+def _read_debug(msg: str) -> None:
+    if os.environ.get("MEDALLION_DEBUG_READ", "").lower() in ("1", "true", "yes"):
+        print(msg, flush=True)
+
+
+def _arrow_to_spark_df(spark: SparkSession, table) -> DataFrame:
+    import pyarrow as pa
+    from pyspark.sql.types import StructField, StructType
+    from pyspark.sql.pandas.types import from_arrow_type
+
+    table = pa.Table.combine_chunks(table)
+    try:
+        return spark.createDataFrame(table)
+    except Exception:
+        schema = StructType(
+            [
+                StructField(field.name, from_arrow_type(field.type), nullable=field.nullable)
+                for field in table.schema
+            ]
+        )
+        cols = [table.column(i).to_pylist() for i in range(table.num_columns)]
+        if not cols:
+            return spark.createDataFrame([], schema)
+        return spark.createDataFrame(list(zip(*cols)), schema=schema)
+
+
 def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
-    """Optional fallback (NB_Cursor_Bronze); set MEDALLION_DELTALAKE_READ=1."""
+    """Azure CLI + deltalake (Fabric endpoint) -> Spark DataFrame; same auth as NB_Cursor_Bronze."""
     from deltalake import DeltaTable
 
     from common.fabric_storage import fabric_storage_options
 
+    _read_debug(f"read_table: deltalake open {path}")
     dt = DeltaTable(path, storage_options=fabric_storage_options())
+    _read_debug("read_table: deltalake loading pyarrow...")
     table = dt.to_pyarrow_table()
-    from pyspark.sql.types import StructField, StructType
-    from pyspark.sql.pandas.types import from_arrow_type
-
-    schema = StructType(
-        [
-            StructField(field.name, from_arrow_type(field.type), nullable=field.nullable)
-            for field in table.schema
-        ]
-    )
-    cols = [table.column(i).to_pylist() for i in range(table.num_columns)]
-    if not cols:
-        return spark.createDataFrame([], schema)
-    rows = list(zip(*cols))
-    return spark.createDataFrame(rows, schema=schema)
+    _read_debug(f"read_table: {table.num_rows} rows -> Spark")
+    return _arrow_to_spark_df(spark, table)
 
 
 def _read_delta_via_pyspark(spark: SparkSession, path: str) -> DataFrame:
     from common.fabric_storage import apply_azure_cli_abfs_conf
 
+    _read_debug(f"read_table: pyspark delta.load {path}")
     apply_azure_cli_abfs_conf(spark)
     return spark.read.format("delta").load(path)
 
 
 def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
-    """Local: PySpark Delta on OneLake abfss (az login). Fabric: spark.table."""
+    """Local: OneLake via az login (default deltalake). Fabric: spark.table."""
     if _use_path_reads():
         path = delta_path_for_table(table_fqn)
         if path:
-            if os.environ.get("MEDALLION_DELTALAKE_READ", "").lower() in (
-                "1",
-                "true",
-                "yes",
-            ):
+            _read_debug(f"read_table: {table_fqn}")
+            if _use_deltalake_read():
                 return _read_delta_via_deltalake(spark, path)
             return _read_delta_via_pyspark(spark, path)
     return spark.table(table_fqn)

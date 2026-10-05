@@ -173,17 +173,22 @@ def _ensure_onelake_read_deps() -> None:
         import azure.identity  # noqa: F401
     except ImportError:
         missing.append("azure-identity")
-    try:
-        fabric_storage.onelake_cli_token_jar()
-    except FileNotFoundError:
-        missing.append("common/jars/onelake-cli-token-provider.jar")
+    if io._use_deltalake_read():
+        try:
+            import deltalake  # noqa: F401
+        except ImportError:
+            missing.append("deltalake[pyarrow]")
+    else:
+        try:
+            fabric_storage.onelake_cli_token_jar()
+        except FileNotFoundError:
+            missing.append("common/jars/onelake-cli-token-provider.jar")
     if missing:
         req = Path(__file__).resolve().parent.parent / "requirements-local-spark.txt"
         raise RuntimeError(
-            "Local OneLake reads use PySpark Delta on abfss (az login).\n"
+            "Local OneLake reads use az login (default: deltalake + Fabric endpoint).\n"
             f"Missing: {', '.join(missing)}\n"
             f"Python: {sys.executable}\n"
-            f"  python -m pip install azure-identity\n"
             f"  python -m pip install -r {req}\n"
             "Then restart the Jupyter kernel and re-run bootstrap."
         )
@@ -218,8 +223,8 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     import pyspark
 
     read_mode = (
-        "deltalake-fallback"
-        if os.environ.get("MEDALLION_DELTALAKE_READ", "").lower() in ("1", "true", "yes")
+        "deltalake-az-cli"
+        if io._use_deltalake_read()
         else "pyspark-delta-abfss"
     )
     print(
@@ -230,11 +235,19 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     jars = info.get("jar_packages")
     if jars:
         print(f"spark.jars.packages={jars}")
-    if io._use_path_reads() and read_mode == "pyspark-delta-abfss":
-        print("OneLake reads: az login + spark.read.format('delta').load(abfss://...).")
+    if io._use_path_reads():
+        if read_mode == "deltalake-az-cli":
+            print(
+                "OneLake reads: az login + deltalake (use_fabric_endpoint) -> Spark DataFrame."
+            )
+        else:
+            print(
+                "OneLake reads: az login + spark.read.format('delta').load(abfss://...)."
+            )
         cursor_path = io.delta_path_for_table(config.TABLE_CURSOR_BRONZE)
         if cursor_path:
             print(f"TABLE_CURSOR_BRONZE -> {cursor_path}")
+        print("Tip: set MEDALLION_DEBUG_READ=1 before bootstrap to log read progress.")
 
 
 init_notebook(globals())
