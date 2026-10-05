@@ -1,4 +1,5 @@
-# Match pip PySpark to your installed Spark (e.g. 3.5.x). Spark 4 needs pyspark 4.x + delta 4.x.
+# Python 3.11 or 3.12 only. Use one PySpark line — do not pip upgrade pyspark in place (breaks imports).
 pyspark==3.5.4
 delta-spark==3.2.0
+py4j==0.10.9.7
 ipykernel>=6.29.0

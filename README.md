@@ -28,10 +28,18 @@ $env:MEDALLION_REGISTER_TABLES = "1"
 ## Local setup (Windows)
 
 ```powershell
-cd C:\spark-dev\fabric\fabric
+cd C:\spark-dev
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements-local-spark.txt
+pip install -r fabric\fabric\requirements-local-spark.txt
+python fabric\fabric\scripts\verify_local_spark.py
+```
+
+If verify fails with `cannot import name '_with_origin'` (or similar), PySpark is **corrupted** — reinstall, do not upgrade in place:
+
+```powershell
+.\fabric\fabric\scripts\reinstall_local_spark.ps1
+# or manually: pip uninstall -y pyspark delta-spark py4j; pip cache purge; pip install pyspark==3.5.4 delta-spark==3.2.0
 ```
 
 Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversableOnce` / `scala.collection.*` on `spark.table`:
