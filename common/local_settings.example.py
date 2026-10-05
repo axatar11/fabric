@@ -1,15 +1,9 @@
-# Copy to common/local_settings.py (gitignored).
-
-from common.bootstrap import create_onelake_spark
-
-# Service principal for OneLake abfss (local Jupyter). Env vars override these.
-FABRIC_TENANT_ID = ""
-FABRIC_CLIENT_ID = ""
-FABRIC_CLIENT_SECRET = ""
+# Copy to common/local_settings.py (gitignored) only if you need a custom SparkSession.
 
 
 def create_spark(app_name: str = "MedallionLocal"):
-    """SparkSession for Fabric OneLake (Delta + abfss JARs + OAuth)."""
+    from common.bootstrap import create_onelake_spark
+
     return create_onelake_spark(app_name)
 
 

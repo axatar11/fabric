@@ -1,5 +1,4 @@
 common/local_settings.py
-.env
 .venv/
 __pycache__/
 common/__pycache__/
