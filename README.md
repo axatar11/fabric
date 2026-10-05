@@ -5,14 +5,10 @@ HC, Okta, and Cursor usage pipelines (Bronze → Silver → Gold) for **Microsof
 ## One entry point (use this everywhere)
 
 ```python
-%run medallion_entry
+%run ./common/common_bootstrap
 ```
 
-Or equivalently:
-
-```python
-%run common_bootstrap
-```
+(Local Jupyter can use `medallion_entry.ipynb` instead — same init.)
 
 That loads the shared Python package under `medallion/`:
 
