@@ -62,6 +62,7 @@ def _load_optional_local_settings() -> dict[str, Any]:
         settings["table_path_overrides"] = getattr(
             local_settings, "ONELAKE_TABLE_OVERRIDES", {}
         )
+        settings["create_spark"] = getattr(local_settings, "create_spark", None)
     except ImportError:
         pass
     return settings
@@ -199,6 +200,12 @@ def get_or_create_spark(
             "mode": "getOrCreate",
             "register_tables": False,
         }
+
+    local_settings = _load_optional_local_settings()
+    create_spark = local_settings.get("create_spark")
+    if callable(create_spark):
+        spark = create_spark(app_name)
+        return spark, {"runtime": "local", "mode": "custom", "register_tables": True}
 
     spark = build_local_spark(app_name=app_name)
     return spark, {"runtime": "local", "mode": "created", "register_tables": True}

@@ -48,16 +48,16 @@ py -3.12 -m venv .venv
 pip install -r requirements-local-spark.txt
 ```
 
-### 2. Credentials (service principal → Fabric workspace Contributor)
+### 2. Connect to Fabric (pick one — you do not need all of these)
 
-```powershell
-$env:FABRIC_TENANT_ID = "<tenant>"
-$env:FABRIC_CLIENT_ID = "<client-id>"
-$env:FABRIC_CLIENT_SECRET = "<secret>"
-$env:MEDALLION_SPARK_PROFILE = "local"
-```
+**A. You already have working Spark connection code (recommended for you)**  
+Copy `medallion/local_settings.example.py` → `medallion/local_settings.py` and put your code in `create_spark()`.  
+`%run medallion_entry` will call that and skip the built-in OAuth/env-var builder.
 
-Optional: copy `medallion/local_settings.example.py` → `medallion/local_settings.py` for extra Spark conf or OneLake path overrides.
+**B. Two cells in the notebook**  
+Cell 1: your existing code that creates `spark`. Cell 2: `%run medallion_entry` — it **reuses** that session.
+
+**C. Built-in builder only** (if you are not using A or B): set service principal values before starting Jupyter. In PowerShell, `$env:FABRIC_TENANT_ID = "..."` lasts only until you **close that window** (“once per session”); open a new terminal → set them again. Or put them in `local_settings` / your `create_spark()` instead so you do not rely on the shell.
 
 ### 3. Run a single pipeline notebook
 
