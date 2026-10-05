@@ -157,9 +157,37 @@ def show_sample(df, n: int = 10) -> None:
         df.limit(n).show(truncate=False)
 
 
+def _ensure_onelake_read_deps() -> None:
+    if not io._use_path_reads():
+        return
+    if os.environ.get("MEDALLION_SPARK_DELTA_READ", "").lower() in ("1", "true", "yes"):
+        return
+    missing: list[str] = []
+    try:
+        import deltalake  # noqa: F401
+    except ImportError:
+        missing.append("deltalake")
+    try:
+        import azure.identity  # noqa: F401
+    except ImportError:
+        missing.append("azure-identity")
+    if not missing:
+        return
+    req = Path(__file__).resolve().parent.parent / "requirements-local-spark.txt"
+    raise RuntimeError(
+        "OneLake read_table() needs deltalake + azure-identity (same as NB_Cursor_Bronze).\n"
+        f"Missing: {', '.join(missing)}\n"
+        f"Python: {sys.executable}\n"
+        f"  python -m pip install deltalake azure-identity pandas pyarrow\n"
+        f"Or: python -m pip install -r {req}\n"
+        "Then restart the Jupyter kernel and re-run bootstrap."
+    )
+
+
 def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion") -> None:
     from pyspark.sql import functions as F
 
+    _ensure_onelake_read_deps()
     spark, info = _get_spark(notebook_globals, app_name)
     read_table = lambda name: io.read_table(spark, name)  # noqa: E731
 

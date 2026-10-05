@@ -67,7 +67,23 @@ def main() -> int:
         print("If you see GenTraversableOnce, remove SPARK_HOME or match it to pyspark version.")
         return 1
 
-    print("OK — PySpark is usable. Open a notebook and run %run ./common/bootstrap")
+    for pkg, import_name in (
+        ("deltalake", "deltalake"),
+        ("azure-identity", "azure.identity"),
+        ("pandas", "pandas"),
+        ("pyarrow", "pyarrow"),
+    ):
+        try:
+            __import__(import_name)
+        except ImportError as exc:
+            print(f"FAIL missing {pkg}:", exc)
+            print(f"  python -m pip install -r {REPO / 'requirements-local-spark.txt'}")
+            return 1
+
+    print(
+        "OK — PySpark + OneLake read deps (deltalake, azure-identity). "
+        "Run az login, then %run ./common/bootstrap"
+    )
     return 0
 
 
