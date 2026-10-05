@@ -17,7 +17,7 @@ That loads **`common/`** only:
 | `io.py` | Delta overwrite + merge |
 | `transforms.py` | Shared column logic |
 
-**Local OneLake reads** use the same pattern as **`NB_Cursor_Bronze.ipynb`**: `az login`, then **`AzureCliCredential`** + **`deltalake`** with `bearer_token` and `use_fabric_endpoint` (see `common/fabric_storage.py`). No tenant/client/secret env vars.
+**Local OneLake reads** use **PySpark Delta** on abfss: `az login`, then `read_table()` → `spark.read.format("delta").load(...)` with an Azure CLI token (no tenant/SP env vars). Optional deltalake path: `$env:MEDALLION_DELTALAKE_READ = "1"`.
 
 ```powershell
 az login
