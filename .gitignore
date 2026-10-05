@@ -1,4 +1,4 @@
-medallion/local_settings.py
+common/local_settings.py
 .venv/
 __pycache__/
 common/__pycache__/
