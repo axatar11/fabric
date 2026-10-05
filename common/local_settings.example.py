@@ -1,13 +1,11 @@
-# Copy to common/local_settings.py (gitignored).
-
-from common.bootstrap import create_onelake_spark
+# Copy to common/local_settings.py (gitignored) only if you need a custom SparkSession.
 
 
 def create_spark(app_name: str = "MedallionLocal"):
-    """SparkSession for Fabric OneLake (Delta + abfss JARs + OAuth from env)."""
+    from common.bootstrap import create_onelake_spark
+
     return create_onelake_spark(app_name)
 
 
 SPARK_EXTRA_CONFIG = {}
-# Optional: TABLE_FQN -> full abfss://.../Tables/... path
 ONELAKE_TABLE_OVERRIDES = {}

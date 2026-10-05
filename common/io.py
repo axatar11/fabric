@@ -62,12 +62,28 @@ def _use_path_reads() -> bool:
     return True
 
 
+def _read_delta_via_azure_cli(spark: SparkSession, path: str) -> DataFrame:
+    """NB_Cursor_Bronze pattern: deltalake + AzureCliCredential (no tenant/SP env vars)."""
+    from deltalake import DeltaTable
+
+    from common.fabric_storage import fabric_storage_options
+
+    dt = DeltaTable(path, storage_options=fabric_storage_options())
+    return spark.createDataFrame(dt.to_pandas())
+
+
 def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
-    """Local: read Delta by OneLake path (avoids broken metastore). Fabric: spark.table."""
+    """Local: OneLake Delta via Azure CLI + deltalake. Fabric: spark.table."""
     if _use_path_reads():
         path = delta_path_for_table(table_fqn)
         if path:
-            return spark.read.format("delta").load(path)
+            if os.environ.get("MEDALLION_SPARK_DELTA_READ", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                return spark.read.format("delta").load(path)
+            return _read_delta_via_azure_cli(spark, path)
     return spark.table(table_fqn)
 
 

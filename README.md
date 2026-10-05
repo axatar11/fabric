@@ -17,9 +17,14 @@ That loads **`common/`** only:
 | `io.py` | Delta overwrite + merge |
 | `transforms.py` | Shared column logic |
 
-**Local OneLake:** set `FABRIC_TENANT_ID`, `FABRIC_CLIENT_ID`, and `FABRIC_CLIENT_SECRET` (service principal with lake access). Bootstrap pulls **Delta + hadoop-azure** via Maven for `abfss://` reads.
+**Local OneLake reads** use the same pattern as **`NB_Cursor_Bronze.ipynb`**: `az login`, then **`AzureCliCredential`** + **`deltalake`** with `bearer_token` and `use_fabric_endpoint` (see `common/fabric_storage.py`). No tenant/client/secret env vars.
 
-**Local Spark (recommended):** copy `common/local_settings.example.py` → `common/local_settings.py` (delegates to `create_onelake_spark`). Only replace `create_spark()` if you need extra config; keep `spark.jars.packages` including hadoop-azure.
+```powershell
+az login
+pip install -r fabric\fabric\requirements-local-spark.txt
+```
+
+Optional: copy `common/local_settings.example.py` → `common/local_settings.py` only if you need a custom `create_spark()`.
 
 Table registration (`CREATE TABLE … LOCATION abfss://…`) is **off** by default (it caused catalog/Scala errors on many local setups). Turn on only if you need it:
 
@@ -56,15 +61,11 @@ Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversa
 
 2. **Stale session** — restart kernel, or before bootstrap: `$env:MEDALLION_FRESH_SPARK = "1"`.
 
-3. **Reads** — locally we default to `read_table()` (Delta path on OneLake), not `spark.table()`, to avoid a broken local metastore. Check bootstrap output: `path_reads=True`.
+3. **Reads** — locally `read_table()` uses **azure-cli+deltalake** (bootstrap banner). Not `spark.table()`. Run **`az login`** first.
 
-4. **`SecureAzureBlobFileSystem not found`** — Spark was started without **hadoop-azure** (stale kernel or custom `create_spark()` without JARs). Fix:
-   ```powershell
-   $env:MEDALLION_FRESH_SPARK = "1"
-   ```
-   Restart the Jupyter kernel, re-run bootstrap, or use `create_onelake_spark` from `local_settings.example.py`.
+4. **Auth errors on read** — sign in with Azure CLI (`az login`). Ensure Azure CLI is installed (bootstrap prepends the default Windows install path like `NB_Cursor_Bronze`).
 
-5. **`WeakReferenceMap` / `NoClassDefFoundError`** — **hadoop-azure** version is newer than Spark's bundled **hadoop-common** (common if `MEDALLION_AZURE_PACKAGES` pins 3.3.6). Bootstrap defaults **hadoop-azure 3.3.4** for PySpark 3.5.x; override with `MEDALLION_HADOOP_VERSION` only if it matches your Spark Hadoop build. Then `MEDALLION_FRESH_SPARK=1` and restart the kernel.
+5. **Force Spark ABFS reads** (optional, needs service principal + hadoop-azure JARs): `$env:MEDALLION_SPARK_DELTA_READ = "1"` plus OAuth env vars — not the default.
 
 Run `python scripts/verify_local_spark.py` in your venv to sanity-check Spark before opening a notebook.
 
