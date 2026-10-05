@@ -173,16 +173,14 @@ def _ensure_onelake_read_deps() -> None:
         import azure.identity  # noqa: F401
     except ImportError:
         missing.append("azure-identity")
-    if io._use_deltalake_read():
-        try:
-            import deltalake  # noqa: F401
-        except ImportError:
-            missing.append("deltalake[pyarrow]")
-    else:
-        try:
-            fabric_storage.onelake_cli_token_jar()
-        except FileNotFoundError:
-            missing.append("common/jars/onelake-cli-token-provider.jar")
+    try:
+        import deltalake  # noqa: F401
+    except ImportError:
+        missing.append("deltalake[pyarrow]")
+    try:
+        fabric_storage.onelake_cli_token_jar()
+    except FileNotFoundError:
+        missing.append("common/jars/onelake-cli-token-provider.jar")
     if missing:
         req = Path(__file__).resolve().parent.parent / "requirements-local-spark.txt"
         raise RuntimeError(
@@ -222,11 +220,12 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
 
     import pyspark
 
-    read_mode = (
-        "deltalake-az-cli"
-        if io._use_deltalake_read()
-        else "pyspark-delta-abfss"
-    )
+    if io._use_deltalake_read():
+        read_mode = "deltalake-only"
+    elif os.environ.get("MEDALLION_PYSPARK_ABFSS_READ", "").lower() in ("1", "true", "yes"):
+        read_mode = "pyspark-only"
+    else:
+        read_mode = "auto"
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "
         f"spark={spark.version} pyspark={pyspark.__version__} "
@@ -236,13 +235,16 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     if jars:
         print(f"spark.jars.packages={jars}")
     if io._use_path_reads():
-        if read_mode == "deltalake-az-cli":
+        if read_mode == "auto":
             print(
-                "OneLake reads: az login + deltalake (use_fabric_endpoint) -> Spark DataFrame."
+                "OneLake reads: auto — PySpark for Fabric column-mapped Delta; "
+                "else deltalake + az login."
             )
+        elif read_mode == "deltalake-only":
+            print("OneLake reads: deltalake only (may show NaN on column-mapped tables).")
         else:
             print(
-                "OneLake reads: az login + spark.read.format('delta').load(abfss://...)."
+                "OneLake reads: PySpark spark.read.format('delta').load(abfss://...) + az login."
             )
         cursor_path = io.delta_path_for_table(config.TABLE_CURSOR_BRONZE)
         if cursor_path:

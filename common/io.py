@@ -67,12 +67,49 @@ def _use_path_reads() -> bool:
 
 
 def _use_deltalake_read() -> bool:
-    """Default: deltalake + az login (NB_Cursor_Bronze). PySpark abfss often hangs on OneLake."""
+    """True when env forces deltalake-only (see _resolve_read_backend for per-table auto)."""
     flag = os.environ.get("MEDALLION_DELTALAKE_READ")
-    if flag is not None:
-        return flag.lower() in ("1", "true", "yes")
-    abfss = os.environ.get("MEDALLION_PYSPARK_ABFSS_READ", "")
-    return abfss.lower() not in ("1", "true", "yes")
+    if flag is None:
+        return False
+    return flag.lower() in ("1", "true", "yes")
+
+
+def _fabric_delta_needs_pyspark(path: str) -> bool:
+    """Fabric Delta often uses column mapping; deltalake then shows NULL/NaN — PySpark reads correctly."""
+    from deltalake import DeltaTable
+
+    from common.fabric_storage import fabric_storage_options
+
+    dt = DeltaTable(path, storage_options=fabric_storage_options())
+    try:
+        meta = dt.metadata()
+        conf = getattr(meta, "configuration", None) or {}
+        mode = str(conf.get("delta.columnMapping.mode", "none")).lower()
+        if mode not in ("none", ""):
+            _read_debug(f"read_table: delta.columnMapping.mode={mode} -> PySpark")
+            return True
+        dv = str(conf.get("delta.enableDeletionVectors", "false")).lower()
+        if dv in ("1", "true", "yes"):
+            _read_debug("read_table: deletion vectors enabled -> PySpark")
+            return True
+    except Exception:
+        pass
+    for field in getattr(dt.schema(), "fields", []) or []:
+        md = getattr(field, "metadata", None) or {}
+        if any(str(k).startswith("delta.columnMapping") for k in md):
+            _read_debug("read_table: schema has column mapping -> PySpark")
+            return True
+    return False
+
+
+def _resolve_read_backend(path: str) -> str:
+    if os.environ.get("MEDALLION_PYSPARK_ABFSS_READ", "").lower() in ("1", "true", "yes"):
+        return "pyspark"
+    if _use_deltalake_read():
+        return "deltalake"
+    if _fabric_delta_needs_pyspark(path):
+        return "pyspark"
+    return "deltalake"
 
 
 def _read_debug(msg: str) -> None:
@@ -108,8 +145,9 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
     if _use_path_reads():
         path = delta_path_for_table(table_fqn)
         if path:
-            _read_debug(f"read_table: {table_fqn}")
-            if _use_deltalake_read():
+            backend = _resolve_read_backend(path)
+            _read_debug(f"read_table: {table_fqn} backend={backend}")
+            if backend == "deltalake":
                 return _read_delta_via_deltalake(spark, path)
             return _read_delta_via_pyspark(spark, path)
     return spark.table(table_fqn)
