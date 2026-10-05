@@ -17,7 +17,9 @@ That loads **`common/`** only:
 | `io.py` | Delta overwrite + merge |
 | `transforms.py` | Shared column logic |
 
-**Local with your own Spark code (recommended):** copy `common/local_settings.example.py` → `common/local_settings.py` and implement `create_spark()`.
+**Local OneLake:** set `FABRIC_TENANT_ID`, `FABRIC_CLIENT_ID`, and `FABRIC_CLIENT_SECRET` (service principal with lake access). Bootstrap pulls **Delta + hadoop-azure** via Maven for `abfss://` reads.
+
+**Local Spark (recommended):** copy `common/local_settings.example.py` → `common/local_settings.py` (delegates to `create_onelake_spark`). Only replace `create_spark()` if you need extra config; keep `spark.jars.packages` including hadoop-azure.
 
 Table registration (`CREATE TABLE … LOCATION abfss://…`) is **off** by default (it caused catalog/Scala errors on many local setups). Turn on only if you need it:
 
@@ -55,6 +57,12 @@ Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversa
 2. **Stale session** — restart kernel, or before bootstrap: `$env:MEDALLION_FRESH_SPARK = "1"`.
 
 3. **Reads** — locally we default to `read_table()` (Delta path on OneLake), not `spark.table()`, to avoid a broken local metastore. Check bootstrap output: `path_reads=True`.
+
+4. **`SecureAzureBlobFileSystem not found`** — Spark was started without **hadoop-azure** (stale kernel or custom `create_spark()` without JARs). Fix:
+   ```powershell
+   $env:MEDALLION_FRESH_SPARK = "1"
+   ```
+   Restart the Jupyter kernel, re-run bootstrap, or use `create_onelake_spark` from `local_settings.example.py`.
 
 Run `python scripts/verify_local_spark.py` in your venv to sanity-check Spark before opening a notebook.
 
