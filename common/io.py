@@ -103,13 +103,15 @@ def _fabric_delta_needs_pyspark(path: str) -> bool:
 
 
 def _resolve_read_backend(path: str) -> str:
-    if os.environ.get("MEDALLION_PYSPARK_ABFSS_READ", "").lower() in ("1", "true", "yes"):
-        return "pyspark"
+    """Default PySpark delta.load (Fabric notebooks); deltalake only when explicitly requested."""
     if _use_deltalake_read():
+        if _fabric_delta_needs_pyspark(path):
+            _read_debug(
+                "read_table: WARNING column-mapped table with MEDALLION_DELTALAKE_READ=1 "
+                "(values may be NaN; use PySpark default instead)"
+            )
         return "deltalake"
-    if _fabric_delta_needs_pyspark(path):
-        return "pyspark"
-    return "deltalake"
+    return "pyspark"
 
 
 def _read_debug(msg: str) -> None:
@@ -132,6 +134,11 @@ def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
     return spark.createDataFrame(pdf)
 
 
+def load_delta_path(spark: SparkSession, path: str) -> DataFrame:
+    """Local az login + ``spark.read.format('delta').load(path)`` (same as Fabric notebooks)."""
+    return _read_delta_via_pyspark(spark, path)
+
+
 def _read_delta_via_pyspark(spark: SparkSession, path: str) -> DataFrame:
     from common.fabric_storage import apply_azure_cli_abfs_conf
 
@@ -141,7 +148,7 @@ def _read_delta_via_pyspark(spark: SparkSession, path: str) -> DataFrame:
 
 
 def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
-    """Local: OneLake via az login (default deltalake). Fabric: spark.table."""
+    """Local: PySpark Delta on abfss (az login). Fabric runtime: spark.table."""
     if _use_path_reads():
         path = delta_path_for_table(table_fqn)
         if path:
