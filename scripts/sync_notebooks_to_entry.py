@@ -43,10 +43,14 @@ def set_bootstrap_cell(nb: dict) -> None:
 
 
 def main() -> None:
-    for name in Path(ROOT).glob("NB_*Bronze*.ipynb"):
-        nb = load_nb(name)
+    for name in (
+        "NB_HCHistorical_Bronze_To_Silver.ipynb",
+        "NB_OktaUserforAI_Bronze_To_Silver.ipynb",
+        "NB_CursorUsage_Bronze_To_Silver.ipynb",
+    ):
+        nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
-        save_nb(name, nb)
+        save_nb(ROOT / name, nb)
     for name in ("NB_CursorUsage_Gold.ipynb",):
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
