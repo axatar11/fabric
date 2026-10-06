@@ -478,10 +478,15 @@ def _write_spark_parquet_dir(df: DataFrame, path: Path) -> None:
     df.write.mode("overwrite").parquet(target)
 
 
-def _write_df_to_local_parquet(df: DataFrame, path: Path) -> None:
+def _write_df_to_local_parquet(
+    df: DataFrame, path: Path, *, staging: bool = False
+) -> None:
     """Materialize locally for cache or merge staging."""
-    parts = max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1")))
-    df = _sanitize_df_for_export(df.coalesce(parts))
+    if staging:
+        df = _df_for_staging_write(df)
+    else:
+        parts = max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1")))
+        df = _sanitize_df_for_export(df.coalesce(parts))
     if _use_path_reads() and _local_parquet_use_spark_writer():
         try:
             _write_spark_parquet_dir(df, path)
@@ -587,6 +592,23 @@ def _merge_coalesce_parts() -> int:
     return max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1")))
 
 
+def _staging_write_partitions() -> int:
+    """Partitions for local break/staging parquet (coalesce(1) often crashes Python workers on large Windows runs)."""
+    override = os.environ.get("MEDALLION_STAGING_WRITE_PARTITIONS")
+    if override is not None:
+        return max(1, int(override))
+    coalesce = os.environ.get("MEDALLION_MERGE_COALESCE")
+    if coalesce is not None and int(coalesce) > 1:
+        return max(1, int(coalesce))
+    return max(4, int(os.environ.get("MEDALLION_MERGE_SHUFFLE_PARTITIONS", "4")))
+
+
+def _df_for_staging_write(df: DataFrame) -> DataFrame:
+    df = _sanitize_df_for_export(df)
+    parts = _staging_write_partitions()
+    return df.repartition(parts) if parts > 1 else df.coalesce(1)
+
+
 def apply_local_merge_spark_conf(spark: SparkSession) -> None:
     """Call before building write_df locally — avoids broadcast joins that crash Python workers."""
     if not _use_path_reads():
@@ -636,9 +658,8 @@ def break_lineage_local(spark: SparkSession, df: DataFrame, label: str) -> DataF
     """Write/read local parquet so later joins are not stuck on an old broadcast plan."""
     apply_local_merge_spark_conf(spark)
     path = Path.home() / ".fabric" / "merge_staging" / "_break" / label
-    df = _sanitize_df_for_export(df)
     _read_progress(f"break_lineage_local: {label} -> {path}")
-    _write_df_to_local_parquet(df.coalesce(_merge_coalesce_parts()), path)
+    _write_df_to_local_parquet(df, path, staging=True)
     return spark.read.parquet(str(path))
 
 
@@ -646,9 +667,8 @@ def publish_merge_staging(df: DataFrame, table_fqn: str) -> Path:
     """Call at end of transform — merge_incremental reads this (no Spark collect on join plan)."""
     apply_local_merge_spark_conf(df.sparkSession)
     path = merge_staging_path(table_fqn)
-    df = _sanitize_df_for_export(df)
     _read_progress(f"publish_merge_staging: {table_fqn} -> {path}")
-    _write_df_to_local_parquet(df.coalesce(_merge_coalesce_parts()), path)
+    _write_df_to_local_parquet(df, path, staging=True)
     return path
 
 
