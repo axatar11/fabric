@@ -41,7 +41,8 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_HC_BRONZE: onelake_table_path(bronze, "dbo/HC_Bronze_Historical"),
         config.TABLE_OKTA_BRONZE: onelake_table_path(bronze, "dbo/CoreOktaUser"),
         config.TABLE_COUNTRY: onelake_table_path(
-            silver, "dbo/CoreCountry_Excel_Hours_Historic"
+            config.LAKEHOUSE_AI_MEDALLION_SILVER_DB_ID,
+            "dbo/CoreCountry_Excel_Hours_Historic",
         ),
         config.TABLE_HC_SILVER: onelake_table_path(med, "Silver/hc_silver_historical"),
         config.TABLE_OKTA_SILVER: onelake_table_path(med, "Silver/okta_user_for_ai"),
