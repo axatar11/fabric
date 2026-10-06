@@ -604,6 +604,34 @@ def merge_staging_path(table_fqn: str) -> Path:
     return Path.home() / ".fabric" / "merge_staging" / safe
 
 
+def read_table_broken_lineage(
+    spark: SparkSession, table_fqn: str, label: str
+) -> DataFrame:
+    """``read_table`` then materialize for joins — skip extra copy when local cache already holds parquet."""
+    cache_path = local_cache_path(table_fqn)
+    had_cache = (
+        _local_table_cache_enabled()
+        and not _local_cache_refresh()
+        and cache_file_exists(cache_path)
+    )
+    df = read_table(spark, table_fqn)
+    if had_cache:
+        _read_progress(
+            f"read_table_broken_lineage: cache hit, skip break_lineage ({label})"
+        )
+        return df
+    if (
+        _local_table_cache_enabled()
+        and not _local_cache_refresh()
+        and cache_file_exists(cache_path)
+    ):
+        _read_progress(
+            f"read_table_broken_lineage: re-open cache after OneLake scan ({label})"
+        )
+        return _read_parquet_cache_dir(spark, cache_path, table_fqn)
+    return break_lineage_local(spark, df, label)
+
+
 def break_lineage_local(spark: SparkSession, df: DataFrame, label: str) -> DataFrame:
     """Write/read local parquet so later joins are not stuck on an old broadcast plan."""
     apply_local_merge_spark_conf(spark)
