@@ -201,12 +201,19 @@ def _write_local_cache_schema(cache_dir: Path, spark_schema: "StructType") -> No
 
 
 def _read_local_cache_schema(cache_dir: Path) -> "StructType | None":
+    import json
+
     from pyspark.sql.types import StructType
 
     path = _local_cache_schema_path(cache_dir)
     if not path.is_file():
         return None
-    return StructType.fromJson(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return StructType.fromJson(payload)
+    except Exception as exc:
+        _read_debug(f"read_table: ignore cache schema file ({exc!s})")
+        return None
 
 
 def _spark_schema_for_table_fqn(table_fqn: str) -> "StructType | None":
