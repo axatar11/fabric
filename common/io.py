@@ -437,14 +437,35 @@ def _read_from_local_cache(spark: SparkSession, table_fqn: str) -> DataFrame | N
     return _read_parquet_cache_dir(spark, path, table_fqn)
 
 
+def _local_parquet_use_spark_writer() -> bool:
+    flag = os.environ.get("MEDALLION_STAGING_SPARK_PARQUET", "1")
+    return flag.lower() not in ("0", "false", "no")
+
+
+def _write_spark_parquet_dir(df: DataFrame, path: Path) -> None:
+    """JVM parquet to file:// (no Python worker / Arrow collect — safe for large join plans)."""
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(parents=True, exist_ok=True)
+    target = path.resolve().as_uri()
+    df.write.mode("overwrite").parquet(target)
+
+
 def _write_df_to_local_parquet(df: DataFrame, path: Path) -> None:
-    """PyArrow parquet from a single-partition Arrow collect (not Spark parquet writer)."""
-    spark = df.sparkSession
-    spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
-    batch_size = os.environ.get("MEDALLION_ARROW_BATCH_SIZE", "10000")
-    spark.conf.set("spark.sql.execution.arrow.maxRecordsPerBatch", batch_size)
+    """Materialize locally for cache or merge staging."""
     parts = max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1")))
-    pdf = _sanitize_df_for_export(df.coalesce(parts)).toPandas()
+    df = _sanitize_df_for_export(df.coalesce(parts))
+    if _use_path_reads() and _local_parquet_use_spark_writer():
+        try:
+            _write_spark_parquet_dir(df, path)
+            return
+        except Exception as exc:
+            _read_debug(
+                f"local Spark parquet write failed ({exc!s}); falling back to PyArrow collect"
+            )
+    spark = df.sparkSession
+    spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
+    pdf = df.toPandas()
     _write_pandas_to_parquet_dir(pdf, path, spark_schema=df.schema)
 
 
@@ -477,7 +498,7 @@ def load_table_cache(spark: SparkSession, table_fqn: str) -> DataFrame:
     path = local_cache_path(table_fqn)
     if not path.is_dir() or not any(path.glob("*.parquet")):
         raise FileNotFoundError(f"No local cache for {table_fqn} at {path}")
-    return spark.read.parquet(str(path))
+    return _read_parquet_cache_dir(spark, path, table_fqn)
 
 
 def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
@@ -546,6 +567,7 @@ def apply_local_merge_spark_conf(spark: SparkSession) -> None:
     spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
     spark.conf.set("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
     spark.conf.set("spark.sql.adaptive.enabled", "false")
+    spark.conf.set("spark.sql.join.preferSortMergeJoin", "true")
     parts = os.environ.get("MEDALLION_MERGE_SHUFFLE_PARTITIONS", "4")
     spark.conf.set("spark.sql.shuffle.partitions", parts)
 
