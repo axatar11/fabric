@@ -124,6 +124,11 @@ def _build_spark(app_name: str):
     )
     for k, v in _local_settings().get("spark_extra_config", {}).items():
         builder = builder.config(k, v)
+    if io._use_path_reads():
+        builder = (
+            builder.config("spark.sql.autoBroadcastJoinThreshold", "-1")
+            .config("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
+        )
     spark = builder.getOrCreate()
     if io._use_path_reads():
         fabric_storage.apply_azure_cli_abfs_conf(spark)
@@ -206,6 +211,7 @@ def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
     notebook_globals["merge_incremental"] = io.merge_incremental
     notebook_globals["save_table_cache"] = io.save_table_cache
     notebook_globals["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
+    notebook_globals["apply_local_merge_spark_conf"] = io.apply_local_merge_spark_conf
     print("Reloaded common.io (spark session and existing DataFrames unchanged).")
 
 
@@ -225,6 +231,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "bronze_cursor_path": config.ONELAKE_CURSOR_BRONZE_PATH,
             "write_full_table": io.write_full_table,
             "merge_incremental": io.merge_incremental,
+            "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
             "trim_lower": transforms.trim_lower,
             "is_valid_email": transforms.is_valid_email,
             "date_from_yyyymm": transforms.date_from_yyyymm,
