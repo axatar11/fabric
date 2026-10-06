@@ -183,6 +183,10 @@ def _scan_batches_to_spark(
             _read_debug(f"read_table: scan ... {row_count} rows streamed")
             next_progress += 50_000
         if pending_rows >= chunk_limit:
+            _read_debug(
+                f"read_table: scan chunk flush to Spark "
+                f"(batch rows>={chunk_limit}, total so far {row_count})"
+            )
             flush_chunk()
 
     flush_chunk()
