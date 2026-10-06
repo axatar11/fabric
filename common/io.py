@@ -493,8 +493,19 @@ def _write_df_to_local_parquet(
             return
         except Exception as exc:
             _read_debug(
-                f"local Spark parquet write failed ({exc!s}); falling back to PyArrow collect"
+                f"local Spark parquet write failed ({exc!s}); trying localCheckpoint"
             )
+        if staging:
+            try:
+                spark = df.sparkSession
+                df = _materialize_local_checkpoint(spark, df)
+                _write_spark_parquet_dir(df.coalesce(1), path)
+                return
+            except Exception as exc2:
+                _read_debug(
+                    f"localCheckpoint parquet write failed ({exc2!s}); "
+                    "falling back to PyArrow collect"
+                )
     spark = df.sparkSession
     spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
     pdf = df.toPandas()
@@ -617,8 +628,22 @@ def apply_local_merge_spark_conf(spark: SparkSession) -> None:
     spark.conf.set("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
     spark.conf.set("spark.sql.adaptive.enabled", "false")
     spark.conf.set("spark.sql.join.preferSortMergeJoin", "true")
+    spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
+    spark.conf.set("spark.sql.execution.arrow.pyspark.fallback.enabled", "false")
     parts = os.environ.get("MEDALLION_MERGE_SHUFFLE_PARTITIONS", "4")
     spark.conf.set("spark.sql.shuffle.partitions", parts)
+
+
+def _local_checkpoint_dir() -> Path:
+    path = Path.home() / ".fabric" / "spark_checkpoint"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _materialize_local_checkpoint(spark: SparkSession, df: DataFrame) -> DataFrame:
+    spark.sparkContext.setCheckpointDir(str(_local_checkpoint_dir()))
+    _read_progress("materialize: localCheckpoint (eager)")
+    return df.localCheckpoint(eager=True)
 
 
 def merge_staging_path(table_fqn: str) -> Path:
