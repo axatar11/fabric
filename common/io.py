@@ -695,11 +695,18 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
         predicate = _merge_predicate(merge_key)
         staging = merge_staging_path(table_name)
         if not staging.is_dir() or not any(staging.glob("*.parquet")):
-            raise RuntimeError(
-                f"No merge staging parquet at {staging}. "
-                "Re-run the transform cell (apply_local_merge_spark_conf first); "
-                "end with publish_merge_staging(write_df, TABLE_CURSOR_SILVER)."
-            )
+            if df is not None:
+                _read_progress(
+                    f"merge_incremental: no staging at {staging}; "
+                    f"publish_merge_staging from DataFrame ({table_name})"
+                )
+                publish_merge_staging(df, table_name)
+            else:
+                raise RuntimeError(
+                    f"No merge staging parquet at {staging}. "
+                    "Re-run the transform cell (apply_local_merge_spark_conf first); "
+                    f"end with publish_merge_staging(your_df, {table_name!r})."
+                )
         table_exists = _deltalake_table_exists(path)
         dt = None
         chunk_no = 0
