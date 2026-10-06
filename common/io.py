@@ -394,8 +394,45 @@ def apply_local_merge_spark_conf(spark: SparkSession) -> None:
         return
     spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
     spark.conf.set("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
+    spark.conf.set("spark.sql.adaptive.enabled", "false")
     parts = os.environ.get("MEDALLION_MERGE_SHUFFLE_PARTITIONS", "4")
     spark.conf.set("spark.sql.shuffle.partitions", parts)
+
+
+def merge_staging_path(table_fqn: str) -> Path:
+    safe = table_fqn.replace(".", "__")
+    return Path.home() / ".fabric" / "merge_staging" / safe
+
+
+def break_lineage_local(spark: SparkSession, df: DataFrame, label: str) -> DataFrame:
+    """Write/read local parquet so later joins are not stuck on an old broadcast plan."""
+    apply_local_merge_spark_conf(spark)
+    path = Path.home() / ".fabric" / "merge_staging" / "_break" / label
+    df = _sanitize_df_for_export(df)
+    _read_progress(f"break_lineage_local: {label} -> {path}")
+    _write_df_to_local_parquet(df.coalesce(_merge_coalesce_parts()), path)
+    return spark.read.parquet(str(path))
+
+
+def publish_merge_staging(df: DataFrame, table_fqn: str) -> Path:
+    """Call at end of transform — merge_incremental reads this (no Spark collect on join plan)."""
+    apply_local_merge_spark_conf(df.sparkSession)
+    path = merge_staging_path(table_fqn)
+    df = _sanitize_df_for_export(df)
+    _read_progress(f"publish_merge_staging: {table_fqn} -> {path}")
+    _write_df_to_local_parquet(df.coalesce(_merge_coalesce_parts()), path)
+    return path
+
+
+def _parquet_staging_batches(staging: Path):
+    import pyarrow.parquet as pq
+
+    chunk_rows = _merge_chunk_rows()
+    if not staging.is_dir() or not any(staging.glob("*.parquet")):
+        return
+    for parquet_file in sorted(staging.glob("*.parquet")):
+        for batch in pq.ParquetFile(parquet_file).iter_batches(batch_size=chunk_rows):
+            yield batch.to_pandas()
 
 
 def _sanitize_df_for_export(df: DataFrame) -> DataFrame:
@@ -408,32 +445,11 @@ def _sanitize_df_for_export(df: DataFrame) -> DataFrame:
     return df
 
 
-def _materialize_for_merge(spark: SparkSession, df: DataFrame) -> DataFrame:
-    """Execute join plan once with broadcast disabled, then export from a simple scan."""
-    apply_local_merge_spark_conf(spark)
-    df = _sanitize_df_for_export(df)
-    _read_progress("merge_incremental: materializing (localCheckpoint, broadcast off)...")
-    return df.localCheckpoint(eager=True)
-
-
 def _spark_to_pandas_batches(df: DataFrame):
-    """Stage to local parquet, read with PyArrow — no Spark Python iterator collect."""
-    import uuid
-
-    import pyarrow.parquet as pq
-
-    spark = df.sparkSession
-    df = _materialize_for_merge(spark, df)
-    chunk_rows = _merge_chunk_rows()
-    staging = Path.home() / ".fabric" / "merge_staging" / uuid.uuid4().hex
-    _read_progress(f"deltalake: staging parquet under {staging}...")
-    try:
-        _write_df_to_local_parquet(df, staging)
-        for parquet_file in sorted(staging.glob("*.parquet")):
-            for batch in pq.ParquetFile(parquet_file).iter_batches(batch_size=chunk_rows):
-                yield batch.to_pandas()
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
+    """Fallback only — prefer publish_merge_staging + _parquet_staging_batches."""
+    staging = merge_staging_path("_adhoc_fallback")
+    publish_merge_staging(df, "_adhoc_fallback")
+    yield from _parquet_staging_batches(staging)
 
 
 def _spark_df_to_deltalake(df: DataFrame, path: str, *, mode: str = "overwrite") -> None:
@@ -497,10 +513,17 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
         opts = fabric_storage_options()
         _read_progress(f"merge_incremental: deltalake path {path}")
         predicate = _merge_predicate(merge_key)
+        staging = merge_staging_path(table_name)
+        if not staging.is_dir() or not any(staging.glob("*.parquet")):
+            raise RuntimeError(
+                f"No merge staging parquet at {staging}. "
+                "Re-run the transform cell (apply_local_merge_spark_conf first); "
+                "end with publish_merge_staging(write_df, TABLE_CURSOR_SILVER)."
+            )
         table_exists = _deltalake_table_exists(path)
         dt = None
         chunk_no = 0
-        for source in _spark_to_pandas_batches(df):
+        for source in _parquet_staging_batches(staging):
             chunk_no += 1
             _read_progress(f"merge_incremental: chunk {chunk_no} ({len(source)} rows)...")
             if not table_exists:

@@ -212,6 +212,10 @@ def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
     notebook_globals["save_table_cache"] = io.save_table_cache
     notebook_globals["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
     notebook_globals["apply_local_merge_spark_conf"] = io.apply_local_merge_spark_conf
+    notebook_globals["break_lineage_local"] = lambda df, label: io.break_lineage_local(
+        spark, df, label
+    )
+    notebook_globals["publish_merge_staging"] = io.publish_merge_staging
     print("Reloaded common.io (spark session and existing DataFrames unchanged).")
 
 
@@ -232,6 +236,10 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "write_full_table": io.write_full_table,
             "merge_incremental": io.merge_incremental,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
+            "break_lineage_local": lambda df, label: io.break_lineage_local(
+                spark, df, label
+            ),
+            "publish_merge_staging": io.publish_merge_staging,
             "trim_lower": transforms.trim_lower,
             "is_valid_email": transforms.is_valid_email,
             "date_from_yyyymm": transforms.date_from_yyyymm,
