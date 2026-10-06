@@ -388,30 +388,52 @@ def _merge_coalesce_parts() -> int:
     return max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1")))
 
 
-def _spark_to_pandas_batches(df: DataFrame):
-    """Single-partition iterator collect — avoids parallel Python workers crashing on Windows."""
-    import pandas as pd
+def apply_local_merge_spark_conf(spark: SparkSession) -> None:
+    """Call before building write_df locally — avoids broadcast joins that crash Python workers."""
+    if not _use_path_reads():
+        return
+    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
+    spark.conf.set("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
+    parts = os.environ.get("MEDALLION_MERGE_SHUFFLE_PARTITIONS", "4")
+    spark.conf.set("spark.sql.shuffle.partitions", parts)
 
+
+def _sanitize_df_for_export(df: DataFrame) -> DataFrame:
+    from pyspark.sql import functions as F
+    from pyspark.sql.types import DecimalType
+
+    for field in df.schema.fields:
+        if isinstance(field.dataType, DecimalType):
+            df = df.withColumn(field.name, F.col(field.name).cast("double"))
+    return df
+
+
+def _materialize_for_merge(spark: SparkSession, df: DataFrame) -> DataFrame:
+    """Execute join plan once with broadcast disabled, then export from a simple scan."""
+    apply_local_merge_spark_conf(spark)
+    df = _sanitize_df_for_export(df)
+    _read_progress("merge_incremental: materializing (localCheckpoint, broadcast off)...")
+    return df.localCheckpoint(eager=True)
+
+
+def _spark_to_pandas_batches(df: DataFrame):
+    """Stage to local parquet, read with PyArrow — no Spark Python iterator collect."""
+    import uuid
+
+    import pyarrow.parquet as pq
+
+    spark = df.sparkSession
+    df = _materialize_for_merge(spark, df)
     chunk_rows = _merge_chunk_rows()
-    parts = _merge_coalesce_parts()
-    narrowed = df.coalesce(parts)
-    columns = narrowed.columns
-    batch: list = []
-    total = 0
-    _read_progress(
-        f"deltalake: collecting from Spark (coalesce={parts}, chunk_rows={chunk_rows})..."
-    )
-    for row in narrowed.toLocalIterator():
-        batch.append(row)
-        if len(batch) >= chunk_rows:
-            total += len(batch)
-            _read_progress(f"deltalake: collected {total} rows from Spark")
-            yield pd.DataFrame(batch, columns=columns)
-            batch = []
-    if batch:
-        total += len(batch)
-        _read_progress(f"deltalake: collected {total} rows from Spark")
-        yield pd.DataFrame(batch, columns=columns)
+    staging = Path.home() / ".fabric" / "merge_staging" / uuid.uuid4().hex
+    _read_progress(f"deltalake: staging parquet under {staging}...")
+    try:
+        _write_df_to_local_parquet(df, staging)
+        for parquet_file in sorted(staging.glob("*.parquet")):
+            for batch in pq.ParquetFile(parquet_file).iter_batches(batch_size=chunk_rows):
+                yield batch.to_pandas()
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def _spark_df_to_deltalake(df: DataFrame, path: str, *, mode: str = "overwrite") -> None:
