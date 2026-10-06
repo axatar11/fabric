@@ -150,6 +150,7 @@ def _deltalake_schema_to_spark(dt) -> "StructType":
 
 def _pandas_for_spark_schema(pdf: "pd.DataFrame", spark_schema: "StructType") -> "pd.DataFrame":
     import pandas as pd
+    from pyspark.sql.types import StringType
 
     names = [f.name for f in spark_schema.fields]
     for name in names:
@@ -158,7 +159,10 @@ def _pandas_for_spark_schema(pdf: "pd.DataFrame", spark_schema: "StructType") ->
     pdf = pdf[names]
     for field in spark_schema.fields:
         col = field.name
-        if pdf[col].isna().all():
+        if isinstance(field.dataType, StringType):
+            # Avoid Arrow null type on all-NA chunks (e.g. HCUserNetwork) in cache parquet.
+            pdf[col] = pdf[col].astype("string")
+        elif pdf[col].isna().all():
             pdf[col] = pdf[col].astype("object")
     return pdf
 
