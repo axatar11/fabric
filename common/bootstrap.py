@@ -296,6 +296,12 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     for name in config.CONFIG_NAMES:
         if hasattr(config, name):
             notebook_globals[name] = getattr(config, name)
+    if "TABLE_FACT_CURSOR_ONBOARD" not in notebook_globals:
+        notebook_globals["TABLE_FACT_CURSOR_ONBOARD"] = (
+            f"{config.GOLD_DATABASE}.{config.GOLD_SCHEMA}.fact_cursor_onboard"
+        )
+    if "FACT_CURSOR_ONBOARD_MERGE_KEY" not in notebook_globals:
+        notebook_globals["FACT_CURSOR_ONBOARD_MERGE_KEY"] = "OnboardSurrogateKey"
 
     import pyspark
 

@@ -22,6 +22,14 @@ def onelake_table_path(lakehouse_id: str, *subpath: str) -> str:
     return "/".join([base, *subpath])
 
 
+def _default_gold_table_fqn(table_name: str) -> str:
+    from common import config
+
+    db = getattr(config, "GOLD_DATABASE", "AI_Medallion")
+    schema = getattr(config, "GOLD_SCHEMA", "Gold")
+    return f"{db}.{schema}.{table_name}"
+
+
 def delta_path_for_table(table_fqn: str) -> str | None:
     from common import config
 
@@ -38,15 +46,21 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_HC_SILVER: onelake_table_path(med, "Silver/hc_silver_historical"),
         config.TABLE_OKTA_SILVER: onelake_table_path(med, "Silver/okta_user_for_ai"),
         config.TABLE_CURSOR_SILVER: onelake_table_path(med, "Silver/cursor_usage"),
-        config.TABLE_FACT_CURSOR_ACTIVE: onelake_table_path(
-            med,
-            os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ACTIVE", "Gold/fact_cursor_active"),
-        ),
-        config.TABLE_FACT_CURSOR_ONBOARD: onelake_table_path(
-            med,
-            os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ONBOARD", "Gold/fact_cursor_onboard"),
-        ),
     }
+    active_fqn = getattr(
+        config, "TABLE_FACT_CURSOR_ACTIVE", _default_gold_table_fqn("fact_cursor_active")
+    )
+    mapping[active_fqn] = onelake_table_path(
+        med,
+        os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ACTIVE", "Gold/fact_cursor_active"),
+    )
+    onboard_fqn = getattr(
+        config, "TABLE_FACT_CURSOR_ONBOARD", _default_gold_table_fqn("fact_cursor_onboard")
+    )
+    mapping[onboard_fqn] = onelake_table_path(
+        med,
+        os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ONBOARD", "Gold/fact_cursor_onboard"),
+    )
     try:
         from common import local_settings as ls  # type: ignore
 
