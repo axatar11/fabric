@@ -194,25 +194,24 @@ def _scan_batches_to_spark(
     pending: list = []
     pending_rows = 0
     spark_df: DataFrame | None = None
-    cache_writer: pq.ParquetWriter | None = None
-    cache_file: Path | None = None
+    cache_part = 0
     if cache_dir is not None:
         cache_dir.parent.mkdir(parents=True, exist_ok=True)
         if cache_dir.exists():
             shutil.rmtree(cache_dir, ignore_errors=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_file = cache_dir / "part-00000.parquet"
 
     def flush_chunk() -> None:
-        nonlocal spark_df, pending, pending_rows, cache_writer
+        nonlocal spark_df, pending, pending_rows, cache_part
         if not pending:
             return
         pdf = _pandas_for_spark_schema(_batches_to_pandas(pending), spark_schema)
-        if cache_file is not None:
+        if cache_dir is not None:
+            # One file per chunk — avoids Arrow schema drift (e.g. all-null -> null type).
             table = pa.Table.from_pandas(pdf, preserve_index=False)
-            if cache_writer is None:
-                cache_writer = pq.ParquetWriter(cache_file, table.schema)
-            cache_writer.write_table(table)
+            part_path = cache_dir / f"part-{cache_part:05d}.parquet"
+            pq.write_table(table, part_path)
+            cache_part += 1
         part = spark.createDataFrame(pdf, schema=spark_schema)
         spark_df = part if spark_df is None else spark_df.unionByName(part, allowMissingColumns=True)
         pending = []
@@ -233,8 +232,6 @@ def _scan_batches_to_spark(
             flush_chunk()
 
     flush_chunk()
-    if cache_writer is not None:
-        cache_writer.close()
     if spark_df is None:
         return spark.createDataFrame([], schema=spark_schema), 0
     return spark_df, row_count
@@ -270,6 +267,8 @@ def _read_delta_via_deltalake_scan(
             return df
         except Exception as exc:
             last_error = exc
+            if cache_dir is not None:
+                shutil.rmtree(cache_dir, ignore_errors=True)
             if attempt >= max_retries or not _scan_retriable_error(exc):
                 raise
             wait = min(2**attempt, 15)
