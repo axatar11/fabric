@@ -33,12 +33,6 @@ TABLE_HC_SILVER = f"{SILVER_DATABASE}.{SILVER_SCHEMA}.hc_silver_historical"
 TABLE_OKTA_SILVER = f"{SILVER_DATABASE}.{SILVER_SCHEMA}.okta_user_for_ai"
 TABLE_CURSOR_SILVER = f"{SILVER_DATABASE}.{SILVER_SCHEMA}.cursor_usage"
 TABLE_FACT_CURSOR_ACTIVE = f"{GOLD_DATABASE}.{GOLD_SCHEMA}.fact_cursor_active"
-# OneLake folder name (lowercase). Python symbol stays TABLE_FACT_CURSOR_ACTIVE.
-ONELAKE_GOLD_FACT_CURSOR_ACTIVE = os.environ.get(
-    "ONELAKE_GOLD_FACT_CURSOR_ACTIVE", "Gold/fact_cursor_active"
-)
-# Typo guard if CONFIG_NAMES / io mapping used the wrong symbol name locally.
-TABLE_fact_cursor_active = TABLE_FACT_CURSOR_ACTIVE
 
 NO_COUNTRY = "No Country"
 HC_DIVISION_INC_DEFAULT = "Others"
@@ -88,5 +82,4 @@ CONFIG_NAMES = [
     "CURSOR_BRONZE_FILENAME",
     "ONELAKE_HOST",
     "ONELAKE_CURSOR_BRONZE_PATH",
-    "ONELAKE_GOLD_FACT_CURSOR_ACTIVE",
 ]

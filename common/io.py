@@ -39,7 +39,8 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_OKTA_SILVER: onelake_table_path(med, "Silver/okta_user_for_ai"),
         config.TABLE_CURSOR_SILVER: onelake_table_path(med, "Silver/cursor_usage"),
         config.TABLE_FACT_CURSOR_ACTIVE: onelake_table_path(
-            med, config.ONELAKE_GOLD_FACT_CURSOR_ACTIVE
+            med,
+            os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ACTIVE", "Gold/fact_cursor_active"),
         ),
     }
     try:
