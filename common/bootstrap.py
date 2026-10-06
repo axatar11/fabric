@@ -237,8 +237,11 @@ def _bind_reload_io_helpers(notebook_globals: dict[str, Any]):
 
 
 def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion") -> None:
+    import importlib
+
     from pyspark.sql import functions as F
 
+    importlib.reload(io)
     _ensure_onelake_read_deps()
     spark, info = _get_spark(notebook_globals, app_name)
     read_table = lambda name: io.read_table(spark, name)  # noqa: E731
