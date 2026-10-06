@@ -232,7 +232,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "with_normalized_country": transforms.with_normalized_country,
             "cursor_usage_record_key": transforms.cursor_usage_record_key,
             "show_sample": show_sample,
-            "reload_io_helpers": lambda: reload_io_helpers(notebook_globals),
+            "reload_io_helpers": (
+                lambda g=None: reload_io_helpers(g if g is not None else notebook_globals)
+            ),
             "save_table_cache": io.save_table_cache,
             "load_table_cache": lambda name: io.load_table_cache(spark, name),
         }
