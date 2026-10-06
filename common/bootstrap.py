@@ -197,6 +197,13 @@ def _ensure_onelake_read_deps() -> None:
         )
 
 
+def _bind_read_table_broken_lineage(spark):
+    def read_table_broken_lineage(table_fqn: str, label: str):
+        return io.read_table_broken_lineage(spark, table_fqn, label)
+
+    return read_table_broken_lineage
+
+
 def _bind_break_lineage_local(spark):
     """Accept break_lineage_local(df, label) or break_lineage_local(spark, df, label)."""
 
@@ -227,6 +234,7 @@ def _notebook_reload_io_helpers(
     if spark is None:
         raise RuntimeError("No spark session in notebook; run init_notebook first.")
     ng["read_table"] = lambda name: io.read_table(spark, name)  # noqa: E731
+    ng["read_table_broken_lineage"] = _bind_read_table_broken_lineage(spark)
     ng["load_delta_path"] = lambda path: io.load_delta_path(spark, path)
     ng["write_full_table"] = io.write_full_table
     ng["merge_incremental"] = io.merge_incremental
@@ -270,6 +278,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "spark": spark,
             "F": F,
             "read_table": read_table,
+            "read_table_broken_lineage": _bind_read_table_broken_lineage(spark),
             "load_delta_path": lambda path: io.load_delta_path(spark, path),
             "bronze_cursor_path": config.ONELAKE_CURSOR_BRONZE_PATH,
             "write_full_table": io.write_full_table,
