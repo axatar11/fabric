@@ -2,11 +2,28 @@
 
 Bronze → Silver → Gold for HC, Okta, and Cursor usage.
 
-## Entry (first cell in every pipeline notebook)
+## Entry (every table notebook — run in order after kernel restart)
+
+**Cell 1 — local read/cache settings** (must run before bootstrap):
+
+```python
+import os
+os.environ.setdefault("MEDALLION_DEBUG_READ", "1")
+os.environ.setdefault("MEDALLION_LOCAL_TABLE_CACHE", "1")
+os.environ.setdefault("MEDALLION_SCAN_CHUNK_ROWS", "75000")
+os.environ.setdefault("MEDALLION_SCAN_RETRIES", "6")
+# Force OneLake read: os.environ["MEDALLION_CACHE_REFRESH"] = "1"
+# Clear cache: delete %USERPROFILE%\.fabric\medallion_cache
+```
+
+**Cell 2 — bootstrap:**
 
 ```python
 %run ./common/bootstrap
 ```
+
+Run notebooks **one table at a time** (no all-in-one orchestration notebook):  
+`NB_HCHistorical_Bronze_To_Silver` → `NB_OktaUserforAI_Bronze_To_Silver` → `NB_CursorUsage_Bronze_To_Silver` → `NB_CursorUsage_Gold` → `NB_CursorOnboard_Gold`.
 
 That loads **`common/`** only:
 
@@ -69,15 +86,14 @@ Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversa
 
 Run `python scripts/verify_local_spark.py` in your venv to sanity-check Spark before opening a notebook.
 
-Open `NB_CursorUsage_Bronze_To_Silver.ipynb` → Run All.
+Open each `NB_*` notebook in pipeline order and run all cells (settings → bootstrap → reads/writes).
 
 ## Fabric
 
-Sync repo including `common/`. First cell: `%run ./common/bootstrap`. Attached lakehouse provides tables; no local OAuth unless you run locally.
+Sync repo including `common/`. Run the local settings cell (optional on Fabric), then `%run ./common/bootstrap`. Attached lakehouse provides tables; no local OAuth unless you run locally.
 
 ## Maintenance
 
 ```powershell
 python scripts\sync_notebooks_to_entry.py
-python scripts\build_local_pipeline_notebook.py
 ```
