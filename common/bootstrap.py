@@ -221,6 +221,7 @@ def _notebook_reload_io_helpers(
     import importlib
 
     importlib.reload(io)
+    importlib.reload(transforms)
     ng = notebook_globals_override if notebook_globals_override is not None else notebook_globals
     spark = ng.get("spark")
     if spark is None:
@@ -259,6 +260,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     from pyspark.sql import functions as F
 
     importlib.reload(io)
+    importlib.reload(transforms)
     _ensure_onelake_read_deps()
     spark, info = _get_spark(notebook_globals, app_name)
     read_table = lambda name: io.read_table(spark, name)  # noqa: E731
@@ -281,8 +283,6 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "load_country_lookup": transforms.load_country_lookup,
             "with_normalized_country": transforms.with_normalized_country,
             "cursor_usage_record_key": transforms.cursor_usage_record_key,
-            "join_okta_for_cursor_usage": transforms.join_okta_for_cursor_usage,
-            "join_hc_for_cursor_usage": transforms.join_hc_for_cursor_usage,
             "show_sample": show_sample,
             "reload_io_helpers": _bind_reload_io_helpers(notebook_globals),
             "save_table_cache": io.save_table_cache,
