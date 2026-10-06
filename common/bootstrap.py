@@ -281,6 +281,8 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "load_country_lookup": transforms.load_country_lookup,
             "with_normalized_country": transforms.with_normalized_country,
             "cursor_usage_record_key": transforms.cursor_usage_record_key,
+            "join_okta_for_cursor_usage": transforms.join_okta_for_cursor_usage,
+            "join_hc_for_cursor_usage": transforms.join_hc_for_cursor_usage,
             "show_sample": show_sample,
             "reload_io_helpers": _bind_reload_io_helpers(notebook_globals),
             "save_table_cache": io.save_table_cache,

@@ -54,6 +54,52 @@ def with_normalized_country(
     )
 
 
+def join_okta_for_cursor_usage(base: DataFrame, okta_slim: DataFrame) -> DataFrame:
+    """Equi-joins only (no OR) — avoids BroadcastNestedLoopJoin on local Windows Spark."""
+    on_login = base.join(
+        okta_slim,
+        base.CursorUsageUser == okta_slim.OktaUserEmail,
+        "inner",
+    )
+    on_full = base.join(
+        okta_slim,
+        base.CursorUsageUser == okta_slim.OktaUserFullEmail,
+        "inner",
+    )
+    return on_login.unionByName(on_full).dropDuplicates()
+
+
+def join_hc_for_cursor_usage(
+    joined: DataFrame, hc_slim: DataFrame, division_inc_default: str
+) -> DataFrame:
+    """Left attach HC on email key, then coalesce attrs from full-email key match."""
+    hc_attrs = [c for c in hc_slim.columns if c != "HCKeyEmail"]
+    with_email = joined.join(
+        hc_slim,
+        joined.CursorUsageKeyEmail == hc_slim.HCKeyEmail,
+        "left",
+    )
+    hc_alt = hc_slim.select(
+        F.col("HCKeyEmail").alias("_hc_alt_key"),
+        *[F.col(c).alias(f"_hc_alt_{c}") for c in hc_attrs],
+    )
+    with_both = with_email.join(
+        hc_alt,
+        with_email.CursorUsageKeyFullEmail == hc_alt._hc_alt_key,
+        "left",
+    )
+    for name in hc_attrs:
+        alt = f"_hc_alt_{name}"
+        if alt in with_both.columns:
+            with_both = with_both.withColumn(name, F.coalesce(F.col(name), F.col(alt)))
+    drop_cols = ["_hc_alt_key", *[f"_hc_alt_{c}" for c in hc_attrs]]
+    with_both = with_both.drop(*[c for c in drop_cols if c in with_both.columns])
+    return with_both.withColumn(
+        "HCDivisionINC",
+        F.coalesce(F.col("HCDivisionINC"), F.lit(division_inc_default)),
+    )
+
+
 def cursor_usage_record_key() -> Column:
     parts = [
         F.coalesce(F.col("CursorUsageUser"), F.lit("")),
