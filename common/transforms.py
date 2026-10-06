@@ -100,6 +100,43 @@ def join_hc_for_cursor_usage(
     )
 
 
+def cursor_active_request_count() -> Column:
+    """COUNT(*) OVER (PARTITION BY CursorUsageDate, OktaUserId) per business spec."""
+    from pyspark.sql.window import Window
+
+    return F.count(F.lit(1)).over(
+        Window.partitionBy("CursorUsageDate", "OktaUserId")
+    ).cast("int")
+
+
+def with_cursor_active_request(silver: DataFrame) -> DataFrame:
+    return silver.withColumn("_request", cursor_active_request_count())
+
+
+def cursor_onboard_daily_dedupe(silver: DataFrame) -> DataFrame:
+    from pyspark.sql.window import Window
+
+    w = Window.partitionBy("CursorUsageDate", "OktaUserId").orderBy(
+        F.col("CursorUsageIngestionDate").desc_nulls_last()
+    )
+    return (
+        silver.withColumn("_onboard_rn", F.row_number().over(w))
+        .filter(F.col("_onboard_rn") == 1)
+        .drop("_onboard_rn")
+    )
+
+
+def cursor_onboard_merge_key() -> Column:
+    return F.sha2(
+        F.concat_ws(
+            "|",
+            F.coalesce(F.col("CursorUsageDate").cast("string"), F.lit("")),
+            F.coalesce(F.col("OktaUserId"), F.lit("")),
+        ),
+        256,
+    )
+
+
 def cursor_usage_record_key() -> Column:
     parts = [
         F.coalesce(F.col("CursorUsageUser"), F.lit("")),

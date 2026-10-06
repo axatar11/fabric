@@ -12,6 +12,7 @@ PIPELINES = (
     "NB_OktaUserforAI_Bronze_To_Silver.ipynb",
     "NB_CursorUsage_Bronze_To_Silver.ipynb",
     "NB_CursorUsage_Gold.ipynb",
+    "NB_CursorOnboard_Gold.ipynb",
 )
 
 
