@@ -123,7 +123,39 @@ def _batches_to_pandas(batches) -> "pd.DataFrame":
     return pd.DataFrame(columns)[names]
 
 
-def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]:
+def _deltalake_schema_to_spark(dt) -> "StructType":
+    from pyspark.sql.types import StringType, StructField, StructType
+    from pyspark.sql.pandas.types import from_arrow_type
+
+    arrow_schema = dt.schema().to_arrow()
+    fields = []
+    for field in arrow_schema:
+        try:
+            spark_type = from_arrow_type(field.type)
+        except Exception:
+            spark_type = StringType()
+        fields.append(StructField(field.name, spark_type, nullable=True))
+    return StructType(fields)
+
+
+def _pandas_for_spark_schema(pdf: "pd.DataFrame", spark_schema: "StructType") -> "pd.DataFrame":
+    import pandas as pd
+
+    names = [f.name for f in spark_schema.fields]
+    for name in names:
+        if name not in pdf.columns:
+            pdf[name] = pd.NA
+    pdf = pdf[names]
+    for field in spark_schema.fields:
+        col = field.name
+        if pdf[col].isna().all():
+            pdf[col] = pdf[col].astype("object")
+    return pdf
+
+
+def _scan_batches_to_spark(
+    spark: SparkSession, reader, spark_schema: "StructType"
+) -> tuple[DataFrame, int]:
     """Stream deltalake scan batches into Spark (chunked to limit RAM on large tables)."""
     row_count = 0
     next_progress = 50_000
@@ -136,7 +168,8 @@ def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]
         nonlocal spark_df, pending, pending_rows
         if not pending:
             return
-        part = spark.createDataFrame(_batches_to_pandas(pending))
+        pdf = _pandas_for_spark_schema(_batches_to_pandas(pending), spark_schema)
+        part = spark.createDataFrame(pdf, schema=spark_schema)
         spark_df = part if spark_df is None else spark_df.unionByName(part, allowMissingColumns=True)
         pending = []
         pending_rows = 0
@@ -153,7 +186,7 @@ def _scan_batches_to_spark(spark: SparkSession, reader) -> tuple[DataFrame, int]
 
     flush_chunk()
     if spark_df is None:
-        return spark.createDataFrame([], schema=None), 0
+        return spark.createDataFrame([], schema=spark_schema), 0
     return spark_df, row_count
 
 
@@ -173,9 +206,10 @@ def _read_delta_via_deltalake_scan(spark: SparkSession, path: str) -> DataFrame:
             opts = fabric_storage_options()
             _read_debug(f"read_table: deltalake scan {path} (attempt {attempt}/{max_retries})")
             dt = DeltaTable(path, storage_options=opts)
+            spark_schema = _deltalake_schema_to_spark(dt)
             _read_debug("read_table: deltalake scan() streaming batches...")
             reader = dt.scan()
-            df, row_count = _scan_batches_to_spark(spark, reader)
+            df, row_count = _scan_batches_to_spark(spark, reader, spark_schema)
             _read_debug(f"read_table: scan -> Spark ({row_count} rows)")
             return df
         except Exception as exc:
@@ -201,9 +235,10 @@ def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
     dt = DeltaTable(path, storage_options=fabric_storage_options())
     _read_debug("read_table: deltalake loading data...")
     # PySpark createDataFrame(pyarrow Table) can yield all-NULL rows; pandas bridge matches NB_Cursor_Bronze.
-    pdf = dt.to_pandas()
+    spark_schema = _deltalake_schema_to_spark(dt)
+    pdf = _pandas_for_spark_schema(dt.to_pandas(), spark_schema)
     _read_debug(f"read_table: {len(pdf)} rows -> Spark")
-    return spark.createDataFrame(pdf)
+    return spark.createDataFrame(pdf, schema=spark_schema)
 
 
 def load_delta_path(spark: SparkSession, path: str) -> DataFrame:
