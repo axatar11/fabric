@@ -204,6 +204,8 @@ def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
     notebook_globals["load_delta_path"] = lambda path: io.load_delta_path(spark, path)
     notebook_globals["write_full_table"] = io.write_full_table
     notebook_globals["merge_incremental"] = io.merge_incremental
+    notebook_globals["save_table_cache"] = io.save_table_cache
+    notebook_globals["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
     print("Reloaded common.io (spark session and existing DataFrames unchanged).")
 
 
