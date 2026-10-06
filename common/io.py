@@ -350,7 +350,6 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
         if path:
             backend = _resolve_read_backend(path)
             _read_progress(f"read_table: {table_fqn} backend={backend}")
-            _read_debug(f"read_table: {table_fqn} backend={backend}")
             if backend == "pyspark":
                 df = _read_delta_via_pyspark(spark, path)
             elif backend == "deltalake":
@@ -381,6 +380,40 @@ def _merge_predicate(merge_key: str) -> str:
     return f"target.{key} = source.{key}"
 
 
+def _merge_chunk_rows() -> int:
+    return max(5_000, int(os.environ.get("MEDALLION_MERGE_CHUNK_ROWS", "50000")))
+
+
+def _merge_coalesce_parts() -> int:
+    return max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1")))
+
+
+def _spark_to_pandas_batches(df: DataFrame):
+    """Single-partition iterator collect — avoids parallel Python workers crashing on Windows."""
+    import pandas as pd
+
+    chunk_rows = _merge_chunk_rows()
+    parts = _merge_coalesce_parts()
+    narrowed = df.coalesce(parts)
+    columns = narrowed.columns
+    batch: list = []
+    total = 0
+    _read_progress(
+        f"deltalake: collecting from Spark (coalesce={parts}, chunk_rows={chunk_rows})..."
+    )
+    for row in narrowed.toLocalIterator():
+        batch.append(row)
+        if len(batch) >= chunk_rows:
+            total += len(batch)
+            _read_progress(f"deltalake: collected {total} rows from Spark")
+            yield pd.DataFrame(batch, columns=columns)
+            batch = []
+    if batch:
+        total += len(batch)
+        _read_progress(f"deltalake: collected {total} rows from Spark")
+        yield pd.DataFrame(batch, columns=columns)
+
+
 def _spark_df_to_deltalake(df: DataFrame, path: str, *, mode: str = "overwrite") -> None:
     from deltalake import write_deltalake
 
@@ -388,16 +421,17 @@ def _spark_df_to_deltalake(df: DataFrame, path: str, *, mode: str = "overwrite")
 
     refresh_abfs_token_env()
     opts = fabric_storage_options()
-    _read_debug(f"deltalake write mode={mode} {path} (converting Spark -> pandas)...")
-    pdf = df.toPandas()
-    _read_debug(f"deltalake write uploading {len(pdf)} rows...")
-    write_deltalake(
-        path,
-        pdf,
-        mode=mode,
-        schema_mode="overwrite",
-        storage_options=opts,
-    )
+    _read_debug(f"deltalake write mode={mode} {path} (Spark -> pandas chunks)...")
+    for i, pdf in enumerate(_spark_to_pandas_batches(df)):
+        write_mode = mode if i == 0 else "append"
+        _read_debug(f"deltalake write chunk {i + 1} ({len(pdf)} rows) mode={write_mode}")
+        write_deltalake(
+            path,
+            pdf,
+            mode=write_mode,
+            schema_mode="overwrite" if i == 0 else "merge",
+            storage_options=opts,
+        )
     _read_debug("deltalake write done")
 
 
@@ -439,34 +473,41 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
 
         refresh_abfs_token_env()
         opts = fabric_storage_options()
-        _read_debug(f"merge_incremental: deltalake path {path}")
-        _read_debug("merge_incremental: Spark -> pandas for source batch...")
-        source = df.toPandas()
-        if not _deltalake_table_exists(path):
-            _read_debug("merge_incremental: new table (deltalake overwrite)")
-            write_deltalake(
-                path,
-                source,
-                mode="overwrite",
-                schema_mode="overwrite",
-                storage_options=opts,
-            )
-            return
-        dt = DeltaTable(path, storage_options=opts)
+        _read_progress(f"merge_incremental: deltalake path {path}")
         predicate = _merge_predicate(merge_key)
-        _read_debug(f"merge_incremental: deltalake merge on {predicate}")
-        (
-            dt.merge(
-                source,
-                predicate,
-                source_alias="source",
-                target_alias="target",
+        table_exists = _deltalake_table_exists(path)
+        dt = None
+        chunk_no = 0
+        for source in _spark_to_pandas_batches(df):
+            chunk_no += 1
+            _read_progress(f"merge_incremental: chunk {chunk_no} ({len(source)} rows)...")
+            if not table_exists:
+                write_deltalake(
+                    path,
+                    source,
+                    mode="overwrite",
+                    schema_mode="overwrite",
+                    storage_options=opts,
+                )
+                table_exists = True
+                dt = DeltaTable(path, storage_options=opts)
+                continue
+            assert dt is not None
+            (
+                dt.merge(
+                    source,
+                    predicate,
+                    source_alias="source",
+                    target_alias="target",
+                )
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute()
             )
-            .when_matched_update_all()
-            .when_not_matched_insert_all()
-            .execute()
-        )
-        _read_debug("merge_incremental: deltalake merge done")
+        if chunk_no == 0:
+            _read_progress("merge_incremental: no rows to merge")
+        else:
+            _read_progress("merge_incremental: deltalake merge done")
         return
 
     from delta.tables import DeltaTable as SparkDeltaTable
