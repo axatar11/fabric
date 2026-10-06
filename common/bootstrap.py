@@ -289,8 +289,14 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "load_table_cache": lambda name: io.load_table_cache(spark, name),
         }
     )
+    _config_aliases = {"TABLE_fact_cursor_active": "TABLE_FACT_CURSOR_ACTIVE"}
     for name in config.CONFIG_NAMES:
-        notebook_globals[name] = getattr(config, name)
+        attr = _config_aliases.get(name, name)
+        if not hasattr(config, attr):
+            raise AttributeError(
+                f"common.config has no attribute {attr!r} (CONFIG_NAMES entry {name!r})"
+            )
+        notebook_globals[name] = getattr(config, attr)
 
     import pyspark
 
