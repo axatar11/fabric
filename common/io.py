@@ -150,7 +150,18 @@ def _deltalake_schema_to_spark(dt) -> "StructType":
 
 def _pandas_for_spark_schema(pdf: "pd.DataFrame", spark_schema: "StructType") -> "pd.DataFrame":
     import pandas as pd
-    from pyspark.sql.types import StringType
+    from pyspark.sql.types import (
+        BooleanType,
+        ByteType,
+        DateType,
+        DoubleType,
+        FloatType,
+        IntegerType,
+        LongType,
+        ShortType,
+        StringType,
+        TimestampType,
+    )
 
     names = [f.name for f in spark_schema.fields]
     for name in names:
@@ -159,26 +170,99 @@ def _pandas_for_spark_schema(pdf: "pd.DataFrame", spark_schema: "StructType") ->
     pdf = pdf[names]
     for field in spark_schema.fields:
         col = field.name
-        if isinstance(field.dataType, StringType):
-            # Avoid Arrow null type on all-NA chunks (e.g. HCUserNetwork) in cache parquet.
+        dt = field.dataType
+        if isinstance(dt, StringType):
+            # Avoid Arrow null/int inference on string columns (e.g. HCOffice codes).
             pdf[col] = pdf[col].astype("string")
+        elif isinstance(dt, (IntegerType, LongType, ShortType, ByteType)):
+            pdf[col] = pd.to_numeric(pdf[col], errors="coerce").astype("Int64")
+        elif isinstance(dt, (DoubleType, FloatType)):
+            pdf[col] = pd.to_numeric(pdf[col], errors="coerce")
+        elif isinstance(dt, BooleanType):
+            pdf[col] = pdf[col].astype("boolean")
+        elif isinstance(dt, DateType):
+            pdf[col] = pd.to_datetime(pdf[col], errors="coerce").dt.date
+        elif isinstance(dt, TimestampType):
+            pdf[col] = pd.to_datetime(pdf[col], errors="coerce")
         elif pdf[col].isna().all():
             pdf[col] = pdf[col].astype("object")
     return pdf
 
 
-def _write_pandas_to_parquet_dir(pdf: "pd.DataFrame", path: Path) -> None:
-    """PyArrow parquet (avoids Spark parquet Python worker crashes on Windows)."""
+_LOCAL_CACHE_SCHEMA_FILE = "_spark_schema.json"
+
+
+def _local_cache_schema_path(cache_dir: Path) -> Path:
+    return cache_dir / _LOCAL_CACHE_SCHEMA_FILE
+
+
+def _write_local_cache_schema(cache_dir: Path, spark_schema: "StructType") -> None:
+    _local_cache_schema_path(cache_dir).write_text(spark_schema.json(), encoding="utf-8")
+
+
+def _read_local_cache_schema(cache_dir: Path) -> "StructType | None":
+    from pyspark.sql.types import StructType
+
+    path = _local_cache_schema_path(cache_dir)
+    if not path.is_file():
+        return None
+    return StructType.fromJson(path.read_text(encoding="utf-8"))
+
+
+def _spark_schema_for_table_fqn(table_fqn: str) -> "StructType | None":
+    delta_path = delta_path_for_table(table_fqn)
+    if not delta_path:
+        return None
+    try:
+        from deltalake import DeltaTable
+
+        from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
+
+        refresh_abfs_token_env()
+        dt = DeltaTable(delta_path, storage_options=fabric_storage_options())
+        return _deltalake_schema_to_spark(dt)
+    except Exception:
+        return None
+
+
+def _write_parquet_with_spark_schema(
+    pdf: "pd.DataFrame", spark_schema: "StructType", file_path: Path
+) -> None:
+    """Write one parquet file with stable Arrow types across scan chunks."""
     import pyarrow as pa
     import pyarrow.parquet as pq
+    from pyspark.sql.pandas.types import to_arrow_type
 
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf = _pandas_for_spark_schema(pdf, spark_schema)
+    arrow_fields = [
+        pa.field(f.name, to_arrow_type(f.dataType), nullable=True) for f in spark_schema.fields
+    ]
+    arrow_schema = pa.schema(arrow_fields)
+    table = pa.Table.from_pandas(
+        pdf, schema=arrow_schema, preserve_index=False, safe=False
+    )
+    pq.write_table(table, file_path)
+
+
+def _write_pandas_to_parquet_dir(
+    pdf: "pd.DataFrame", path: Path, *, spark_schema: "StructType | None" = None
+) -> None:
+    """PyArrow parquet (avoids Spark parquet Python worker crashes on Windows)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
     path.mkdir(parents=True, exist_ok=True)
     out = path / "part-00000.parquet"
-    table = pa.Table.from_pandas(pdf, preserve_index=False)
-    pq.write_table(table, out)
+    if spark_schema is not None:
+        _write_parquet_with_spark_schema(pdf, spark_schema, out)
+        _write_local_cache_schema(path, spark_schema)
+    else:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.Table.from_pandas(pdf, preserve_index=False)
+        pq.write_table(table, out)
 
 
 def _scan_batches_to_spark(
@@ -189,9 +273,6 @@ def _scan_batches_to_spark(
     cache_dir: Path | None = None,
 ) -> tuple[DataFrame, int]:
     """Stream deltalake scan batches into Spark (chunked to limit RAM on large tables)."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-
     row_count = 0
     next_progress = 50_000
     chunk_limit = max(10_000, int(os.environ.get("MEDALLION_SCAN_CHUNK_ROWS", "75000")))
@@ -204,6 +285,7 @@ def _scan_batches_to_spark(
         if cache_dir.exists():
             shutil.rmtree(cache_dir, ignore_errors=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
+        _write_local_cache_schema(cache_dir, spark_schema)
 
     def flush_chunk() -> None:
         nonlocal spark_df, pending, pending_rows, cache_part
@@ -211,10 +293,8 @@ def _scan_batches_to_spark(
             return
         pdf = _pandas_for_spark_schema(_batches_to_pandas(pending), spark_schema)
         if cache_dir is not None:
-            # One file per chunk — avoids Arrow schema drift (e.g. all-null -> null type).
-            table = pa.Table.from_pandas(pdf, preserve_index=False)
             part_path = cache_dir / f"part-{cache_part:05d}.parquet"
-            pq.write_table(table, part_path)
+            _write_parquet_with_spark_schema(pdf, spark_schema, part_path)
             cache_part += 1
         part = spark.createDataFrame(pdf, schema=spark_schema)
         spark_df = part if spark_df is None else spark_df.unionByName(part, allowMissingColumns=True)
@@ -338,6 +418,15 @@ def local_cache_path(table_fqn: str) -> Path:
     return root / safe
 
 
+def _read_parquet_cache_dir(
+    spark: SparkSession, cache_dir: Path, table_fqn: str
+) -> DataFrame:
+    schema = _read_local_cache_schema(cache_dir) or _spark_schema_for_table_fqn(table_fqn)
+    if schema is not None:
+        return spark.read.schema(schema).parquet(str(cache_dir))
+    return spark.read.parquet(str(cache_dir))
+
+
 def _read_from_local_cache(spark: SparkSession, table_fqn: str) -> DataFrame | None:
     if not _local_table_cache_enabled() or _local_cache_refresh():
         return None
@@ -345,7 +434,7 @@ def _read_from_local_cache(spark: SparkSession, table_fqn: str) -> DataFrame | N
     if not path.is_dir() or not any(path.glob("*.parquet")):
         return None
     _read_progress(f"read_table: cache hit {table_fqn}")
-    return spark.read.parquet(str(path))
+    return _read_parquet_cache_dir(spark, path, table_fqn)
 
 
 def _write_df_to_local_parquet(df: DataFrame, path: Path) -> None:
@@ -356,7 +445,7 @@ def _write_df_to_local_parquet(df: DataFrame, path: Path) -> None:
     spark.conf.set("spark.sql.execution.arrow.maxRecordsPerBatch", batch_size)
     parts = max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1")))
     pdf = _sanitize_df_for_export(df.coalesce(parts)).toPandas()
-    _write_pandas_to_parquet_dir(pdf, path)
+    _write_pandas_to_parquet_dir(pdf, path, spark_schema=df.schema)
 
 
 def _write_local_cache(df: DataFrame, table_fqn: str) -> None:
