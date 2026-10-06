@@ -277,22 +277,43 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
     return spark.table(table_fqn)
 
 
+def _onelake_delta_path(table_fqn: str) -> str | None:
+    if not _use_path_reads():
+        return None
+    return delta_path_for_table(table_fqn)
+
+
 def write_full_table(df: DataFrame, table_name: str) -> None:
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(table_name)
-    )
+    path = _onelake_delta_path(table_name)
+    writer = df.write.format("delta").mode("overwrite").option("overwriteSchema", "true")
+    if path:
+        from common.fabric_storage import apply_azure_cli_abfs_conf
+
+        apply_azure_cli_abfs_conf(df.sparkSession)
+        _read_debug(f"write_full_table: save {path}")
+        writer.save(path)
+        return
+    writer.saveAsTable(table_name)
 
 
 def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> None:
-    if not spark.catalog.tableExists(table_name):
-        write_full_table(df, table_name)
-        return
     from delta.tables import DeltaTable
 
-    target = DeltaTable.forName(spark, table_name)
+    path = _onelake_delta_path(table_name)
+    if path:
+        from common.fabric_storage import apply_azure_cli_abfs_conf
+
+        apply_azure_cli_abfs_conf(spark)
+        _read_debug(f"merge_incremental: path {path}")
+        if not DeltaTable.isDeltaTable(spark, path):
+            write_full_table(df, table_name)
+            return
+        target = DeltaTable.forPath(spark, path)
+    else:
+        if not spark.catalog.tableExists(table_name):
+            write_full_table(df, table_name)
+            return
+        target = DeltaTable.forName(spark, table_name)
     (
         target.alias("target")
         .merge(df.alias("source"), f"target.{merge_key} = source.{merge_key}")
