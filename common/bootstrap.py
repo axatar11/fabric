@@ -197,26 +197,43 @@ def _ensure_onelake_read_deps() -> None:
         )
 
 
-def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
+def _notebook_reload_io_helpers(
+    notebook_globals: dict[str, Any], notebook_globals_override: dict[str, Any] | None = None
+) -> None:
     """Reload common.io after git pull — keeps spark and in-memory DataFrames."""
     import importlib
 
     importlib.reload(io)
-    spark = notebook_globals.get("spark")
+    ng = notebook_globals_override if notebook_globals_override is not None else notebook_globals
+    spark = ng.get("spark")
     if spark is None:
         raise RuntimeError("No spark session in notebook; run init_notebook first.")
-    notebook_globals["read_table"] = lambda name: io.read_table(spark, name)  # noqa: E731
-    notebook_globals["load_delta_path"] = lambda path: io.load_delta_path(spark, path)
-    notebook_globals["write_full_table"] = io.write_full_table
-    notebook_globals["merge_incremental"] = io.merge_incremental
-    notebook_globals["save_table_cache"] = io.save_table_cache
-    notebook_globals["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
-    notebook_globals["apply_local_merge_spark_conf"] = io.apply_local_merge_spark_conf
-    notebook_globals["break_lineage_local"] = lambda df, label: io.break_lineage_local(
-        spark, df, label
-    )
-    notebook_globals["publish_merge_staging"] = io.publish_merge_staging
+    ng["read_table"] = lambda name: io.read_table(spark, name)  # noqa: E731
+    ng["load_delta_path"] = lambda path: io.load_delta_path(spark, path)
+    ng["write_full_table"] = io.write_full_table
+    ng["merge_incremental"] = io.merge_incremental
+    ng["save_table_cache"] = io.save_table_cache
+    ng["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
+    ng["apply_local_merge_spark_conf"] = io.apply_local_merge_spark_conf
+    ng["break_lineage_local"] = lambda df, label: io.break_lineage_local(spark, df, label)
+    ng["publish_merge_staging"] = io.publish_merge_staging
+    ng["reload_io_helpers"] = _bind_reload_io_helpers(ng)
     print("Reloaded common.io (spark session and existing DataFrames unchanged).")
+
+
+def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
+    _notebook_reload_io_helpers(notebook_globals)
+
+
+def _bind_reload_io_helpers(notebook_globals: dict[str, Any]):
+    """Notebook-safe callback — never shadow the module-level reload_io_helpers name."""
+
+    def _reload(notebook_globals_override: dict[str, Any] | None = None) -> None:
+        _notebook_reload_io_helpers(
+            notebook_globals, notebook_globals_override=notebook_globals_override
+        )
+
+    return _reload
 
 
 def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion") -> None:
@@ -247,9 +264,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "with_normalized_country": transforms.with_normalized_country,
             "cursor_usage_record_key": transforms.cursor_usage_record_key,
             "show_sample": show_sample,
-            "reload_io_helpers": (
-                lambda g=None: reload_io_helpers(g if g is not None else notebook_globals)
-            ),
+            "reload_io_helpers": _bind_reload_io_helpers(notebook_globals),
             "save_table_cache": io.save_table_cache,
             "load_table_cache": lambda name: io.load_table_cache(spark, name),
         }
