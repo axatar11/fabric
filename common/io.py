@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -290,20 +291,31 @@ def _read_from_local_cache(spark: SparkSession, table_fqn: str) -> DataFrame | N
     return spark.read.parquet(str(path))
 
 
+def _write_df_to_local_parquet(df: DataFrame, path: Path) -> None:
+    """Local Windows driver: multi-task parquet writes often crash Python workers."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+    parts = max(1, int(os.environ.get("MEDALLION_CACHE_WRITE_PARTITIONS", "1")))
+    df.coalesce(parts).write.mode("overwrite").parquet(str(path))
+
+
 def _write_local_cache(df: DataFrame, table_fqn: str) -> None:
     if not _local_table_cache_enabled():
         return
     path = local_cache_path(table_fqn)
-    path.parent.mkdir(parents=True, exist_ok=True)
     _read_debug(f"read_table: saving local cache {path}")
-    df.write.mode("overwrite").parquet(str(path))
+    try:
+        _write_df_to_local_parquet(df, path)
+    except Exception as exc:
+        # Do not fail the OneLake read if cache write fails (e.g. partial dir on disk).
+        _read_debug(f"read_table: local cache write failed: {exc}")
 
 
 def save_table_cache(df: DataFrame, table_fqn: str) -> Path:
     """Persist an in-memory DataFrame locally (survives kernel restart)."""
     path = local_cache_path(table_fqn)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.write.mode("overwrite").parquet(str(path))
+    _write_df_to_local_parquet(df, path)
     return path
 
 
