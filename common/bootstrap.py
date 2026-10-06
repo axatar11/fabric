@@ -197,6 +197,23 @@ def _ensure_onelake_read_deps() -> None:
         )
 
 
+def _bind_break_lineage_local(spark):
+    """Accept break_lineage_local(df, label) or break_lineage_local(spark, df, label)."""
+
+    def break_lineage_local(*args):
+        if len(args) == 2:
+            df, label = args
+            return io.break_lineage_local(spark, df, label)
+        if len(args) == 3 and args[0] is spark:
+            _, df, label = args
+            return io.break_lineage_local(spark, df, label)
+        raise TypeError(
+            "break_lineage_local(df, label) or break_lineage_local(spark, df, label)"
+        )
+
+    return break_lineage_local
+
+
 def _notebook_reload_io_helpers(
     notebook_globals: dict[str, Any], notebook_globals_override: dict[str, Any] | None = None
 ) -> None:
@@ -215,7 +232,7 @@ def _notebook_reload_io_helpers(
     ng["save_table_cache"] = io.save_table_cache
     ng["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
     ng["apply_local_merge_spark_conf"] = io.apply_local_merge_spark_conf
-    ng["break_lineage_local"] = lambda df, label: io.break_lineage_local(spark, df, label)
+    ng["break_lineage_local"] = _bind_break_lineage_local(spark)
     ng["publish_merge_staging"] = io.publish_merge_staging
     ng["reload_io_helpers"] = _bind_reload_io_helpers(ng)
     print("Reloaded common.io (spark session and existing DataFrames unchanged).")
@@ -256,9 +273,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "write_full_table": io.write_full_table,
             "merge_incremental": io.merge_incremental,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
-            "break_lineage_local": lambda df, label: io.break_lineage_local(
-                spark, df, label
-            ),
+            "break_lineage_local": _bind_break_lineage_local(spark),
             "publish_merge_staging": io.publish_merge_staging,
             "trim_lower": transforms.trim_lower,
             "is_valid_email": transforms.is_valid_email,
