@@ -280,6 +280,11 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
                 "Set MEDALLION_CACHE_REFRESH=1 to force OneLake. reload_io_helpers(globals()) "
                 "after git pull — no kernel restart."
             )
+        if io._use_deltalake_onelake_write():
+            print(
+                "OneLake writes: deltalake + az login (merge/overwrite). "
+                "Set MEDALLION_ONELAKE_WRITE=pyspark to use JVM abfss (often hangs)."
+            )
 
 
 init_notebook(globals())
