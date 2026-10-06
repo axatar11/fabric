@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from common.config import ONELAKE_HOST, WORKSPACEID
@@ -259,21 +260,78 @@ def _read_delta_via_pyspark(spark: SparkSession, path: str) -> DataFrame:
     return spark.read.format("delta").load(path)
 
 
+def _local_table_cache_enabled() -> bool:
+    flag = os.environ.get("MEDALLION_LOCAL_TABLE_CACHE", "1")
+    return flag.lower() not in ("0", "false", "no")
+
+
+def _local_cache_refresh() -> bool:
+    return os.environ.get("MEDALLION_CACHE_REFRESH", "").lower() in ("1", "true", "yes")
+
+
+def local_cache_path(table_fqn: str) -> Path:
+    override = os.environ.get("MEDALLION_LOCAL_CACHE_DIR")
+    root = Path(override) if override else Path.home() / ".fabric" / "medallion_cache"
+    safe = table_fqn.replace(".", "__")
+    return root / safe
+
+
+def _read_from_local_cache(spark: SparkSession, table_fqn: str) -> DataFrame | None:
+    if not _local_table_cache_enabled() or _local_cache_refresh():
+        return None
+    path = local_cache_path(table_fqn)
+    if not path.is_dir() or not any(path.glob("*.parquet")):
+        return None
+    _read_debug(f"read_table: local cache hit {path}")
+    return spark.read.parquet(str(path))
+
+
+def _write_local_cache(df: DataFrame, table_fqn: str) -> None:
+    if not _local_table_cache_enabled():
+        return
+    path = local_cache_path(table_fqn)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _read_debug(f"read_table: saving local cache {path}")
+    df.write.mode("overwrite").parquet(str(path))
+
+
+def save_table_cache(df: DataFrame, table_fqn: str) -> Path:
+    """Persist an in-memory DataFrame locally (survives kernel restart)."""
+    path = local_cache_path(table_fqn)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.write.mode("overwrite").parquet(str(path))
+    return path
+
+
+def load_table_cache(spark: SparkSession, table_fqn: str) -> DataFrame:
+    """Load a table from local parquet cache written by read_table or save_table_cache."""
+    path = local_cache_path(table_fqn)
+    if not path.is_dir() or not any(path.glob("*.parquet")):
+        raise FileNotFoundError(f"No local cache for {table_fqn} at {path}")
+    return spark.read.parquet(str(path))
+
+
 def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
-    """Local: PySpark Delta on abfss (az login). Fabric runtime: spark.table."""
+    """Local: OneLake read (with optional local parquet cache). Fabric: spark.table."""
     if _use_path_reads():
         import gc
 
         gc.collect()
+        cached = _read_from_local_cache(spark, table_fqn)
+        if cached is not None:
+            return cached
         path = delta_path_for_table(table_fqn)
         if path:
             backend = _resolve_read_backend(path)
             _read_debug(f"read_table: {table_fqn} backend={backend}")
             if backend == "pyspark":
-                return _read_delta_via_pyspark(spark, path)
-            if backend == "deltalake":
-                return _read_delta_via_deltalake(spark, path)
-            return _read_delta_via_deltalake_scan(spark, path)
+                df = _read_delta_via_pyspark(spark, path)
+            elif backend == "deltalake":
+                df = _read_delta_via_deltalake(spark, path)
+            else:
+                df = _read_delta_via_deltalake_scan(spark, path)
+            _write_local_cache(df, table_fqn)
+            return df
     return spark.table(table_fqn)
 
 

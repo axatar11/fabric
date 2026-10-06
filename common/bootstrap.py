@@ -192,6 +192,21 @@ def _ensure_onelake_read_deps() -> None:
         )
 
 
+def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
+    """Reload common.io after git pull — keeps spark and in-memory DataFrames."""
+    import importlib
+
+    importlib.reload(io)
+    spark = notebook_globals.get("spark")
+    if spark is None:
+        raise RuntimeError("No spark session in notebook; run init_notebook first.")
+    notebook_globals["read_table"] = lambda name: io.read_table(spark, name)  # noqa: E731
+    notebook_globals["load_delta_path"] = lambda path: io.load_delta_path(spark, path)
+    notebook_globals["write_full_table"] = io.write_full_table
+    notebook_globals["merge_incremental"] = io.merge_incremental
+    print("Reloaded common.io (spark session and existing DataFrames unchanged).")
+
+
 def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion") -> None:
     from pyspark.sql import functions as F
 
@@ -215,6 +230,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "with_normalized_country": transforms.with_normalized_country,
             "cursor_usage_record_key": transforms.cursor_usage_record_key,
             "show_sample": show_sample,
+            "reload_io_helpers": lambda: reload_io_helpers(notebook_globals),
+            "save_table_cache": io.save_table_cache,
+            "load_table_cache": lambda name: io.load_table_cache(spark, name),
         }
     )
     for name in config.CONFIG_NAMES:
@@ -256,6 +274,12 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         print(
             "Tip: large tables — read_table() one at a time; transient Azure errors auto-retry."
         )
+        if io._local_table_cache_enabled():
+            print(
+                "Local table cache ON (default): parquet under ~/.fabric/medallion_cache/. "
+                "Set MEDALLION_CACHE_REFRESH=1 to force OneLake. reload_io_helpers(globals()) "
+                "after git pull — no kernel restart."
+            )
 
 
 init_notebook(globals())
