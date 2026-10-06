@@ -42,6 +42,10 @@ def delta_path_for_table(table_fqn: str) -> str | None:
             med,
             os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ACTIVE", "Gold/fact_cursor_active"),
         ),
+        config.TABLE_FACT_CURSOR_ONBOARD: onelake_table_path(
+            med,
+            os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ONBOARD", "Gold/fact_cursor_onboard"),
+        ),
     }
     try:
         from common import local_settings as ls  # type: ignore

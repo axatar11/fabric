@@ -51,7 +51,7 @@ def main() -> None:
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
         save_nb(ROOT / name, nb)
-    for name in ("NB_CursorUsage_Gold.ipynb",):
+    for name in ("NB_CursorUsage_Gold.ipynb", "NB_CursorOnboard_Gold.ipynb"):
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
         save_nb(ROOT / name, nb)
