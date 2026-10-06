@@ -645,32 +645,34 @@ def _sanitize_df_for_export(df: DataFrame) -> DataFrame:
     return df
 
 
-def _spark_to_pandas_batches(df: DataFrame):
-    """Fallback only — prefer publish_merge_staging + _parquet_staging_batches."""
-    staging = merge_staging_path("_adhoc_fallback")
-    publish_merge_staging(df, "_adhoc_fallback")
-    yield from _parquet_staging_batches(staging)
-
-
-def _spark_df_to_deltalake(df: DataFrame, path: str, *, mode: str = "overwrite") -> None:
+def _deltalake_write_staging_batches(
+    staging: Path, path: str, *, mode: str = "overwrite"
+) -> None:
     from deltalake import write_deltalake
 
     from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
     refresh_abfs_token_env()
     opts = fabric_storage_options()
-    _read_debug(f"deltalake write mode={mode} {path} (Spark -> pandas chunks)...")
-    for i, pdf in enumerate(_spark_to_pandas_batches(df)):
-        write_mode = mode if i == 0 else "append"
-        _read_debug(f"deltalake write chunk {i + 1} ({len(pdf)} rows) mode={write_mode}")
+    _read_debug(f"deltalake write mode={mode} {path} (local staging -> OneLake)...")
+    chunk_no = 0
+    for pdf in _parquet_staging_batches(staging):
+        chunk_no += 1
+        write_mode = mode if chunk_no == 1 else "append"
+        _read_debug(
+            f"deltalake write chunk {chunk_no} ({len(pdf)} rows) mode={write_mode}"
+        )
         write_deltalake(
             path,
             pdf,
             mode=write_mode,
-            schema_mode="overwrite" if i == 0 else "merge",
+            schema_mode="overwrite" if chunk_no == 1 else "merge",
             storage_options=opts,
         )
-    _read_debug("deltalake write done")
+    if chunk_no == 0:
+        _read_progress("deltalake write: staging empty — nothing written")
+    else:
+        _read_debug("deltalake write done")
 
 
 def _deltalake_table_exists(path: str) -> bool:
@@ -686,11 +688,27 @@ def _deltalake_table_exists(path: str) -> bool:
         return False
 
 
-def write_full_table(df: DataFrame, table_name: str) -> None:
+def write_full_table(df: DataFrame | None, table_name: str) -> None:
     path = _onelake_delta_path(table_name)
+    staging = merge_staging_path(table_name)
     if path and _use_deltalake_onelake_write():
-        _spark_df_to_deltalake(df, path, mode="overwrite")
+        if df is not None:
+            apply_local_merge_spark_conf(df.sparkSession)
+            safe = table_name.replace(".", "__")
+            df = break_lineage_local(df.sparkSession, df, f"write_break_{safe}")
+            publish_merge_staging(df, table_name)
+        if not staging.is_dir() or not any(staging.glob("*.parquet")):
+            raise RuntimeError(
+                f"No merge staging parquet at {staging}. "
+                "Re-run transform with apply_local_merge_spark_conf, then "
+                f"write_full_table(your_df, {table_name!r})."
+            )
+        _deltalake_write_staging_batches(staging, path, mode="overwrite")
         return
+    if df is None:
+        raise RuntimeError(
+            f"write_full_table({table_name!r}): DataFrame required for non-deltalake write"
+        )
     writer = df.write.format("delta").mode("overwrite").option("overwriteSchema", "true")
     if path:
         from common.fabric_storage import apply_azure_cli_abfs_conf
