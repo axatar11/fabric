@@ -93,6 +93,14 @@ def _read_debug(msg: str) -> None:
         print(msg, flush=True)
 
 
+def _read_progress(msg: str) -> None:
+    print(msg, flush=True)
+
+
+def _skip_auto_cache_on_read() -> bool:
+    return os.environ.get("MEDALLION_SKIP_AUTO_CACHE", "").lower() in ("1", "true", "yes")
+
+
 def _scan_retriable_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return any(
@@ -287,7 +295,7 @@ def _read_from_local_cache(spark: SparkSession, table_fqn: str) -> DataFrame | N
     path = local_cache_path(table_fqn)
     if not path.is_dir() or not any(path.glob("*.parquet")):
         return None
-    _read_debug(f"read_table: local cache hit {path}")
+    _read_progress(f"read_table: cache hit {table_fqn}")
     return spark.read.parquet(str(path))
 
 
@@ -307,6 +315,7 @@ def _write_local_cache(df: DataFrame, table_fqn: str) -> None:
     _read_debug(f"read_table: saving local cache {path}")
     try:
         _write_df_to_local_parquet(df, path)
+        _read_progress(f"read_table: cached {table_fqn} -> {path}")
     except Exception as exc:
         # Do not fail the OneLake read if cache write fails (e.g. partial dir on disk).
         _read_debug(f"read_table: local cache write failed: {exc}")
@@ -316,6 +325,7 @@ def save_table_cache(df: DataFrame, table_fqn: str) -> Path:
     """Persist an in-memory DataFrame locally (survives kernel restart)."""
     path = local_cache_path(table_fqn)
     _write_df_to_local_parquet(df, path)
+    _read_progress(f"save_table_cache: {table_fqn} -> {path}")
     return path
 
 
@@ -339,6 +349,7 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
         path = delta_path_for_table(table_fqn)
         if path:
             backend = _resolve_read_backend(path)
+            _read_progress(f"read_table: {table_fqn} backend={backend}")
             _read_debug(f"read_table: {table_fqn} backend={backend}")
             if backend == "pyspark":
                 df = _read_delta_via_pyspark(spark, path)
@@ -346,7 +357,8 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
                 df = _read_delta_via_deltalake(spark, path)
             else:
                 df = _read_delta_via_deltalake_scan(spark, path)
-            _write_local_cache(df, table_fqn)
+            if not _skip_auto_cache_on_read():
+                _write_local_cache(df, table_fqn)
             return df
     return spark.table(table_fqn)
 
