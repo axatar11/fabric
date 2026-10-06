@@ -100,17 +100,30 @@ def join_hc_for_cursor_usage(
     )
 
 
-def cursor_active_request_count() -> Column:
-    """COUNT(*) OVER (PARTITION BY CursorUsageDate, OktaUserId) per business spec."""
-    from pyspark.sql.window import Window
+def cursor_active_daily_aggregate(silver: DataFrame) -> DataFrame:
+    """GROUP BY CursorUsageDate, OktaUserId — Request = COUNT(*), dims = first per group."""
+    return silver.groupBy("CursorUsageDate", "OktaUserId").agg(
+        F.first("CursorUsageMonthNo", ignorenulls=True).alias("CursorUsageMonthNo"),
+        F.count(F.lit(1)).cast("int").alias("Request"),
+        F.first("OktaUserFullName", ignorenulls=True).alias("OktaUserFullName"),
+        F.first("OktaUserEmployeeNumber", ignorenulls=True).alias("OktaUserEmployeeNumber"),
+        F.first("OktaUserEmail", ignorenulls=True).alias("OktaUserEmail"),
+        F.first("OktaUserFullEmail", ignorenulls=True).alias("OktaUserFullEmail"),
+        F.first("OktaUserRegion", ignorenulls=True).alias("OktaUserRegion"),
+        F.first("OktaUserCountry", ignorenulls=True).alias("OktaUserCountry"),
+        F.first("HCBusinessUnit", ignorenulls=True).alias("HCBusinessUnit"),
+        F.first("HCJobTitle", ignorenulls=True).alias("HCJobTitle"),
+        F.first("HCOktaUserCountry", ignorenulls=True).alias("HCOktaUserCountry"),
+        F.first("HCOffice", ignorenulls=True).alias("HCOffice"),
+        F.first("HCTalentSegment", ignorenulls=True).alias("HCTalentSegment"),
+        F.first("HCDivision", ignorenulls=True).alias("HCDivision"),
+        F.first("HCBusinessUnitCode", ignorenulls=True).alias("HCBusinessUnitCode"),
+    )
 
-    return F.count(F.lit(1)).over(
-        Window.partitionBy("CursorUsageDate", "OktaUserId")
-    ).cast("int")
 
-
-def with_cursor_active_request(silver: DataFrame) -> DataFrame:
-    return silver.withColumn("_request", cursor_active_request_count())
+def cursor_active_daily_merge_key() -> Column:
+    """Merge grain: one row per (CursorUsageDate, OktaUserId)."""
+    return cursor_onboard_merge_key()
 
 
 def cursor_onboard_daily_dedupe(silver: DataFrame) -> DataFrame:
