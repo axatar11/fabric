@@ -30,7 +30,7 @@ Or use a shared venv at C:\\spark-dev\\.venv (see README).
 Then:
 
   Remove-Item Env:SPARK_HOME -ErrorAction SilentlyContinue
-  python scripts\\verify_local_spark.py
+  python Scripts\verify_local_spark.py
 """
 
 
@@ -76,14 +76,14 @@ def main() -> int:
         print(f"  python -m pip install -r {REPO / 'requirements-local-spark.txt'}")
         return 1
 
-    token_jar = REPO / "common" / "jars" / "onelake-cli-token-provider.jar"
+    token_jar = REPO / "Common" / "jars" / "onelake-cli-token-provider.jar"
     if not token_jar.is_file():
         print("FAIL missing", token_jar)
         return 1
 
     print(
         "OK — PySpark + azure-identity + OneLake token JAR. "
-        "Run az login, then %run ./common/bootstrap"
+        "Run az login, then %run ./Common/bootstrap"
     )
     return 0
 

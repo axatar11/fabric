@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from common.config import ONELAKE_HOST, WORKSPACEID
+from Common.config import ONELAKE_HOST, WORKSPACEID
 
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
@@ -25,7 +25,7 @@ def onelake_table_path(lakehouse_id: str, *subpath: str) -> str:
 
 
 def _default_gold_table_fqn(table_name: str) -> str:
-    from common import config
+    from Common import config
 
     db = getattr(config, "GOLD_DATABASE", "AI_Medallion")
     schema = getattr(config, "GOLD_SCHEMA", "Gold")
@@ -34,7 +34,7 @@ def _default_gold_table_fqn(table_name: str) -> str:
 
 def delta_path_for_table(table_fqn: str) -> str | None:
     """Resolve a catalog FQN (``TABLE_*``) to a OneLake Delta abfss path."""
-    from common import config
+    from Common import config
 
     med = config.LAKEHOUSE_AI_MEDALLION_ID
     bronze = config.LAKEHOUSE_AI_MEDALLION_BRONZE_ID
@@ -66,7 +66,7 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ONBOARD", "Gold/fact_cursor_onboard"),
     )
     try:
-        from common import local_settings as ls  # type: ignore
+        from Common import local_settings as ls  # type: ignore
 
         mapping.update(getattr(ls, "ONELAKE_TABLE_OVERRIDES", {}) or {})
     except ImportError:
@@ -246,7 +246,7 @@ def _spark_schema_for_table_fqn(table_fqn: str) -> "StructType | None":
     try:
         from deltalake import DeltaTable
 
-        from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
+        from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
         refresh_abfs_token_env()
         dt = DeltaTable(delta_path, storage_options=fabric_storage_options())
@@ -359,7 +359,7 @@ def _read_delta_via_deltalake_scan(
 
     from deltalake import DeltaTable
 
-    from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
+    from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
     max_retries = max(1, int(os.environ.get("MEDALLION_SCAN_RETRIES", "6")))
     last_error: BaseException | None = None
@@ -398,7 +398,7 @@ def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
     """Azure CLI + deltalake (Fabric endpoint) -> Spark DataFrame."""
     from deltalake import DeltaTable
 
-    from common.fabric_storage import fabric_storage_options
+    from Common.fabric_storage import fabric_storage_options
 
     _read_debug(f"read_table: deltalake open {path}")
     dt = DeltaTable(path, storage_options=fabric_storage_options())
@@ -421,7 +421,7 @@ def load_delta_path(spark: SparkSession, path: str) -> DataFrame:
 
 
 def _read_delta_via_pyspark(spark: SparkSession, path: str) -> DataFrame:
-    from common.fabric_storage import apply_azure_cli_abfs_conf
+    from Common.fabric_storage import apply_azure_cli_abfs_conf
 
     _read_debug(f"read_table: pyspark delta.load {path}")
     apply_azure_cli_abfs_conf(spark)
@@ -727,7 +727,7 @@ def _deltalake_write_staging_batches(
 ) -> None:
     from deltalake import write_deltalake
 
-    from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
+    from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
     refresh_abfs_token_env()
     opts = fabric_storage_options()
@@ -755,7 +755,7 @@ def _deltalake_write_staging_batches(
 def _deltalake_table_exists(path: str) -> bool:
     from deltalake import DeltaTable
 
-    from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
+    from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
     refresh_abfs_token_env()
     try:
@@ -789,7 +789,7 @@ def write_full_table(df: DataFrame | None, table_name: str) -> None:
         )
     writer = df.write.format("delta").mode("overwrite").option("overwriteSchema", "true")
     if path:
-        from common.fabric_storage import apply_azure_cli_abfs_conf
+        from Common.fabric_storage import apply_azure_cli_abfs_conf
 
         apply_azure_cli_abfs_conf(df.sparkSession)
         _read_debug(f"write_full_table: pyspark save {path}")
@@ -804,7 +804,7 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
     if path and _use_deltalake_onelake_write():
         from deltalake import DeltaTable, write_deltalake
 
-        from common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
+        from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
         refresh_abfs_token_env()
         opts = fabric_storage_options()
@@ -862,7 +862,7 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
     from delta.tables import DeltaTable as SparkDeltaTable
 
     if path:
-        from common.fabric_storage import apply_azure_cli_abfs_conf
+        from Common.fabric_storage import apply_azure_cli_abfs_conf
 
         apply_azure_cli_abfs_conf(spark)
         _read_debug(f"merge_incremental: pyspark abfss path {path}")

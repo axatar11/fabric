@@ -9,5 +9,5 @@ DEFAULT_WINDOWS_REPO = Path(r"C:\spark-dev\CoE_transformation_framework")
 
 
 def repo_root() -> Path:
-    """Directory that contains ``common/`` and ``Notebook/``."""
+    """Directory that contains ``Common/`` and ``Notebook/``."""
     return Path(__file__).resolve().parent.parent

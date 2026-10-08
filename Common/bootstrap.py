@@ -1,6 +1,6 @@
-"""Notebook entry: `%run ./common/bootstrap` — Spark session and injected helpers.
+"""Notebook entry: `%run ./Common/bootstrap` — Spark session and injected helpers.
 
-See ``common/README.md`` for a short catalog of functions.
+See ``Common/README.md`` for a short catalog of functions.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from common import config, fabric_storage, io
+from Common import config, fabric_storage, io
 
 
 def _ensure_pyspark_installed() -> None:
@@ -31,14 +31,14 @@ def _ensure_pyspark_installed() -> None:
             f"  pip install -r {req}\n\n"
             "VS Code → Python: Select Interpreter → "
             "<repo>\\.venv\\Scripts\\python.exe, then restart the kernel.\n"
-            "Check: python scripts/check_env.py"
+            "Check: python Scripts/check_env.py"
         ) from exc
 
 
 def _local_settings() -> dict[str, Any]:
     out: dict[str, Any] = {}
     try:
-        from common import local_settings as ls  # type: ignore
+        from Common import local_settings as ls  # type: ignore
 
         out["create_spark"] = getattr(ls, "create_spark", None)
         out["spark_extra_config"] = getattr(ls, "SPARK_EXTRA_CONFIG", {})
@@ -237,7 +237,7 @@ def _ensure_onelake_read_deps() -> None:
     try:
         fabric_storage.onelake_cli_token_jar()
     except FileNotFoundError:
-        missing.append("common/jars/onelake-cli-token-provider.jar")
+        missing.append("Common/jars/onelake-cli-token-provider.jar")
     if missing:
         req = Path(__file__).resolve().parent.parent / "requirements-local-spark.txt"
         raise RuntimeError(
@@ -276,11 +276,11 @@ def _bind_break_lineage_local(spark):
 def _notebook_reload_io_helpers(
     notebook_globals: dict[str, Any], notebook_globals_override: dict[str, Any] | None = None
 ) -> None:
-    """Reload common.io after git pull — keeps spark and in-memory DataFrames."""
+    """Reload Common.io after git pull — keeps spark and in-memory DataFrames."""
     import importlib
 
     _ensure_pyspark_installed()
-    from common import transforms
+    from Common import transforms
 
     importlib.reload(io)
     importlib.reload(transforms)
@@ -299,7 +299,7 @@ def _notebook_reload_io_helpers(
     ng["break_lineage_local"] = _bind_break_lineage_local(spark)
     ng["publish_merge_staging"] = io.publish_merge_staging
     ng["reload_io_helpers"] = _bind_reload_io_helpers(ng)
-    print("Reloaded common.io (spark session and existing DataFrames unchanged).")
+    print("Reloaded Common.io (spark session and existing DataFrames unchanged).")
 
 
 def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
@@ -325,7 +325,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     from pyspark.sql import functions as F
 
     _ensure_pyspark_installed()
-    from common import transforms
+    from Common import transforms
 
     importlib.reload(io)
     importlib.reload(transforms)
@@ -380,7 +380,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         read_mode = "pyspark-delta-load"
     else:
         read_mode = "deltalake-scan"
-    from common.paths import repo_root
+    from Common.paths import repo_root
 
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "

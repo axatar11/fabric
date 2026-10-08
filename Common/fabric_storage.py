@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from common import config
+from Common import config
 
 _AZURE_CLI_WIN = r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"
 _TOKEN_PROVIDER = "org.fabric.onelake.EnvAccessTokenProvider"
@@ -18,7 +18,7 @@ _HADOOP_CONF_TOKEN_EXPIRY = "org.fabric.onelake.token.expiry"
 
 
 def onelake_cli_token_jar() -> str:
-    """File URI of the Hadoop ABFS token provider JAR bundled under ``common/jars/``."""
+    """File URI of the Hadoop ABFS token provider JAR bundled under ``Common/jars/``."""
     if not _ONELAKE_CLI_JAR.is_file():
         raise FileNotFoundError(
             f"Missing {_ONELAKE_CLI_JAR}. Pull latest repo (PySpark OneLake token JAR)."

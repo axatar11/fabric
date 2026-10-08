@@ -5,7 +5,7 @@ from __future__ import annotations
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
-from common.config import NO_COUNTRY
+from Common.config import NO_COUNTRY
 
 
 def trim_lower(col_name: str) -> Column:
@@ -32,7 +32,7 @@ def date_from_yyyymm(month_no_col: Column) -> Column:
 
 def load_country_lookup(spark, country_table: str) -> DataFrame:
     """Read country reference table; return ``Country`` / ``DisplayName`` key columns."""
-    from common.io import read_table
+    from Common.io import read_table
 
     return read_table(spark, country_table).select(
         F.col("Country").alias("_country_key"),

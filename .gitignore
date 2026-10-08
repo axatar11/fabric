@@ -1,6 +1,6 @@
-common/local_settings.py
+Common/local_settings.py
 .venv/
 __pycache__/
-common/__pycache__/
+Common/__pycache__/
 *.pyc
 .ipynb_checkpoints/

@@ -9,9 +9,10 @@ Bronze → Silver → Gold for HC, Okta, and cursor_usage.
 | `Notebook/Bronze/` | (ingest in Fabric — no pipeline notebooks) |
 | `Notebook/Silver/` | `NB_HCHistorical_Bronze_To_Silver`, `NB_OktaUserforAI_Bronze_To_Silver`, `NB_CursorUsage_Bronze_To_Silver` |
 | `Notebook/Gold/` | `NB_CursorUsage_Gold`, `NB_CursorOnboard_Gold` |
-| `common/` | Bootstrap, config, I/O, transforms — see **`common/README.md`** |
+| `Common/` | Bootstrap, config, I/O, transforms — see **`Common/README.md`** |
+| `Scripts/` | `check_env.py`, `verify_local_spark.py`, `reinstall_local_spark.ps1`, `sync_notebooks_to_entry.py` |
 
-Open this repository as the VS Code workspace root (the folder that contains `common` and `Notebook`). Notebook settings cells adjust the working directory when needed so `%run ./common/bootstrap` resolves correctly.
+Open this repository as the VS Code workspace root (the folder that contains `Common` and `Notebook`). Notebook settings cells adjust the working directory when needed so `%run ./Common/bootstrap` resolves correctly.
 
 ## Local development (Windows)
 
@@ -28,8 +29,8 @@ cd C:\spark-dev\CoE_transformation_framework
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements-local-spark.txt
-python scripts\verify_local_spark.py
-python scripts\check_env.py
+python Scripts\verify_local_spark.py
+python Scripts\check_env.py
 az login
 ```
 
@@ -59,20 +60,20 @@ os.environ.setdefault("MEDALLION_SCAN_RETRIES", "6")
 **Bootstrap:**
 
 ```python
-%run ./common/bootstrap
+%run ./Common/bootstrap
 ```
 
 **Order:**  
 `Notebook/Silver/NB_HCHistorical_Bronze_To_Silver` → `Notebook/Silver/NB_OktaUserforAI_Bronze_To_Silver` → `Notebook/Silver/NB_CursorUsage_Bronze_To_Silver` → `Notebook/Gold/NB_CursorUsage_Gold` → `Notebook/Gold/NB_CursorOnboard_Gold`.
 
-Local reads use **deltalake scan** and `az login` by default. Table paths and lakehouse IDs are in `common/config.py`. Optional overrides: `common/local_settings.py` (see `local_settings.example.py`).
+Local reads use **deltalake scan** and `az login` by default. Table paths and lakehouse IDs are in `Common/config.py`. Optional overrides: `Common/local_settings.py` (see `local_settings.example.py`).
 
 ## Troubleshooting
 
 | Issue | Action |
 |-------|--------|
 | `No module named 'pyspark'` | Wrong kernel — select `.venv\Scripts\python.exe` from **this** repo, restart kernel, or run `pip install -r requirements-local-spark.txt` in that venv. |
-| Corrupted PySpark | `.\scripts\reinstall_local_spark.ps1` from repo root |
+| Corrupted PySpark | `.\Scripts\reinstall_local_spark.ps1` from repo root |
 | Scala / `GenTraversableOnce` | `pip install pyspark==3.5.4 delta-spark==3.2.0`; clear `SPARK_HOME` |
 | Stale Spark session | Restart kernel or `$env:MEDALLION_FRESH_SPARK = "1"` before bootstrap |
 | OneLake auth | `az login` |
@@ -80,11 +81,11 @@ Local reads use **deltalake scan** and `az login` by default. Table paths and la
 
 ## Fabric (cloud)
 
-Sync repo including `common/`. Run settings (optional), then `%run ./common/bootstrap`. Attached lakehouse supplies tables.
+Sync repo including `Common/`. Run settings (optional), then `%run ./Common/bootstrap`. Attached lakehouse supplies tables.
 
 ## Maintenance
 
 ```powershell
 cd C:\spark-dev\CoE_transformation_framework
-python scripts\sync_notebooks_to_entry.py
+python Scripts\sync_notebooks_to_entry.py
 ```
