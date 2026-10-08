@@ -64,7 +64,38 @@ pip install -r requirements-local-spark.txt
 python scripts\verify_local_spark.py
 ```
 
-### 3. Point the IDE at the correct interpreter
+### 3. Two repos side by side (old + new folder)
+
+Copying or recloning into `CoE_transformation_framework` **does not copy Python packages**. A **new** `.venv` inside the new folder starts **empty** (no `pyspark`).
+
+| What you see | Fix |
+|--------------|-----|
+| `ModuleNotFoundError: No module named 'pyspark'` on bootstrap | Kernel is wrong or venv never had `pip install -r requirements-local-spark.txt` |
+| Old repo still works | Old notebook uses **`C:\spark-dev\.venv`** (or another env with PySpark) |
+
+**Recommended:** use **one shared venv** for both folders:
+
+```powershell
+C:\spark-dev\.venv\Scripts\python.exe
+```
+
+In the **new** repo: **Python: Select Interpreter** → that same `python.exe` → **Restart kernel** → settings → bootstrap.
+
+Check from PowerShell:
+
+```powershell
+cd C:\spark-dev\CoE_transformation_framework
+C:\spark-dev\.venv\Scripts\python.exe scripts\check_env.py
+```
+
+You should see `OK — pyspark 3.5.4`. If not:
+
+```powershell
+C:\spark-dev\.venv\Scripts\Activate.ps1
+pip install -r C:\spark-dev\CoE_transformation_framework\requirements-local-spark.txt
+```
+
+### 4. Point the IDE at the correct interpreter
 
 After opening the **`CoE_transformation_framework`** folder:
 
@@ -87,13 +118,13 @@ Optional: set **`MEDALLION_PYTHON`** to a specific `python.exe` before running `
 
 Workspace defaults (`.vscode/settings.json`) assume shared venv at `C:\spark-dev\.venv`; change that path if you use option B.
 
-### 4. Azure login (required for local OneLake reads/writes)
+### 5. Azure login (required for local OneLake reads/writes)
 
 ```powershell
 az login
 ```
 
-### 5. Run pipelines
+### 6. Run pipelines
 
 1. Open e.g. `silver\NB_HCHistorical_Bronze_To_Silver.ipynb`
 2. **Kernel restart** after any env or git change
