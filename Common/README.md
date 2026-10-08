@@ -1,6 +1,6 @@
-# `common/` — shared medallion library
+# `Common/` — shared medallion library
 
-Loaded by **`%run ./common/bootstrap`** in pipeline notebooks. Do not import these modules before the settings cell sets `MEDALLION_*` env vars (bootstrap reloads `io` after env is set).
+Loaded by **`%run ./Common/bootstrap`** in pipeline notebooks. Do not import these modules before the settings cell sets `MEDALLION_*` env vars (bootstrap reloads `io` after env is set).
 
 **Windows clone path:** `C:\spark-dev\CoE_transformation_framework` — see root **`README.md`** for venv and kernel setup.
 
