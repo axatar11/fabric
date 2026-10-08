@@ -2,6 +2,17 @@
 
 Bronze → Silver → Gold for HC, Okta, and Cursor usage.
 
+## Layout
+
+| Folder | Notebooks |
+|--------|-----------|
+| `bronze/` | (ingest in Fabric — no pipeline notebooks) |
+| `silver/` | `NB_HCHistorical_Bronze_To_Silver`, `NB_OktaUserforAI_Bronze_To_Silver`, `NB_CursorUsage_Bronze_To_Silver` |
+| `gold/` | `NB_CursorUsage_Gold`, `NB_CursorOnboard_Gold` |
+| `common/` | Shared bootstrap, config, I/O, transforms |
+
+Open notebooks from **`silver/`** or **`gold/`** in Fabric/Jupyter (repo root = notebook working directory for `%run`).
+
 ## Entry (every table notebook — run in order after kernel restart)
 
 **Cell 1 — local read/cache settings** (must run before bootstrap):
@@ -19,11 +30,12 @@ os.environ.setdefault("MEDALLION_SCAN_RETRIES", "6")
 **Cell 2 — bootstrap:**
 
 ```python
+# Settings cell chdirs to repo root when the kernel starts in silver/ or gold/
 %run ./common/bootstrap
 ```
 
 Run notebooks **one table at a time** (no all-in-one orchestration notebook):  
-`NB_HCHistorical_Bronze_To_Silver` → `NB_OktaUserforAI_Bronze_To_Silver` → `NB_CursorUsage_Bronze_To_Silver` → `NB_CursorUsage_Gold` → `NB_CursorOnboard_Gold`.
+`silver/NB_HCHistorical_Bronze_To_Silver` → `silver/NB_OktaUserforAI_Bronze_To_Silver` → `silver/NB_CursorUsage_Bronze_To_Silver` → `gold/NB_CursorUsage_Gold` → `gold/NB_CursorOnboard_Gold`.
 
 That loads **`common/`** only:
 
@@ -80,7 +92,7 @@ Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversa
 
 3. **Reads** — locally `read_table()` uses **azure-cli+deltalake** (bootstrap banner). Not `spark.table()`. Run **`az login`** first.
 
-4. **Auth errors on read** — sign in with Azure CLI (`az login`). Ensure Azure CLI is installed (bootstrap prepends the default Windows install path like `NB_Cursor_Bronze`).
+4. **Auth errors on read** — sign in with Azure CLI (`az login`). Ensure Azure CLI is installed (bootstrap prepends the default Windows Azure CLI path when present).
 
 5. **Force Spark ABFS reads** (optional, needs service principal + hadoop-azure JARs): `$env:MEDALLION_SPARK_DELTA_READ = "1"` plus OAuth env vars — not the default.
 

@@ -1,4 +1,4 @@
-"""Notebook entry: `%run ./common/bootstrap`"""
+"""Notebook entry: `%run ./common/bootstrap` (settings cell ensures repo root cwd)."""
 
 from __future__ import annotations
 

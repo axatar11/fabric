@@ -44,18 +44,21 @@ def set_bootstrap_cell(nb: dict) -> None:
 
 def main() -> None:
     for name in (
-        "NB_HCHistorical_Bronze_To_Silver.ipynb",
-        "NB_OktaUserforAI_Bronze_To_Silver.ipynb",
-        "NB_CursorUsage_Bronze_To_Silver.ipynb",
+        "silver/NB_HCHistorical_Bronze_To_Silver.ipynb",
+        "silver/NB_OktaUserforAI_Bronze_To_Silver.ipynb",
+        "silver/NB_CursorUsage_Bronze_To_Silver.ipynb",
     ):
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
         save_nb(ROOT / name, nb)
-    for name in ("NB_CursorUsage_Gold.ipynb", "NB_CursorOnboard_Gold.ipynb"):
+    for name in (
+        "gold/NB_CursorUsage_Gold.ipynb",
+        "gold/NB_CursorOnboard_Gold.ipynb",
+    ):
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
         save_nb(ROOT / name, nb)
-    print("Notebooks point to ./common/bootstrap")
+    print("Notebooks point to ./common/bootstrap (settings cell chdirs to repo root)")
 
 
 if __name__ == "__main__":
