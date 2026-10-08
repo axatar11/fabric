@@ -34,7 +34,7 @@ if missing:
     print("Install (PowerShell):")
     print(f"  pip install -r {REQ}")
     print()
-    print("In Cursor: Python: Select Interpreter → pick the same python.exe as above.")
+    print("In VS Code: Python: Select Interpreter → pick the same python.exe as above.")
     print("Restart the notebook kernel after install.")
     sys.exit(1)
 

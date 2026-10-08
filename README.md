@@ -1,6 +1,6 @@
 # Fabric medallion pipelines
 
-Bronze → Silver → Gold for HC, Okta, and Cursor usage.
+Bronze → Silver → Gold for HC, Okta, and cursor_usage.
 
 ## Layout
 
@@ -33,7 +33,7 @@ C:\spark-dev\CoE_transformation_framework\
 Clone or sync the Git repo into **`C:\spark-dev\CoE_transformation_framework`**.  
 Do **not** rely on the old nested path `C:\spark-dev\fabric\fabric\`.
 
-In **Cursor / VS Code**: **File → Open Folder** → select `C:\spark-dev\CoE_transformation_framework` (the folder that contains `common` and `silver`).
+In **VS Code**: **File → Open Folder** → select `C:\spark-dev\CoE_transformation_framework` (the folder that contains `common` and `silver`).
 
 ### 2. Choose a virtual environment (pick one)
 

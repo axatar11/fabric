@@ -31,7 +31,7 @@ def _ensure_pyspark_installed() -> None:
             "from the old repo.\n\n"
             "Fix (pick one):\n"
             "  A) Reuse the working venv from the old setup:\n"
-            "     Cursor → Python: Select Interpreter → C:\\spark-dev\\.venv\\Scripts\\python.exe\n"
+            "     VS Code → Python: Select Interpreter → C:\\spark-dev\\.venv\\Scripts\\python.exe\n"
             "     Restart kernel, then run settings + bootstrap.\n\n"
             "  B) Install into the current venv:\n"
             "     .\\.venv\\Scripts\\Activate.ps1\n"
