@@ -1,4 +1,4 @@
-"""Notebook entry: `%run ./common/bootstrap`"""
+"""Notebook entry: `%run ../common/bootstrap` from silver/ or gold/ notebooks."""
 
 from __future__ import annotations
 
