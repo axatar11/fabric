@@ -14,7 +14,31 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from common import config, fabric_storage, io, transforms
+from common import config, fabric_storage, io
+
+
+def _ensure_pyspark_installed() -> None:
+    """Fail fast with CoE setup hints when the notebook kernel has no PySpark."""
+    try:
+        import pyspark  # noqa: F401
+    except ModuleNotFoundError as exc:
+        req = _REPO / "requirements-local-spark.txt"
+        raise RuntimeError(
+            "PySpark is not installed in the Python used by this notebook kernel.\n\n"
+            f"  Kernel Python: {sys.executable}\n"
+            f"  Repo root:       {_REPO}\n\n"
+            "A new repo folder often gets a new empty .venv — that does NOT copy packages "
+            "from the old repo.\n\n"
+            "Fix (pick one):\n"
+            "  A) Reuse the working venv from the old setup:\n"
+            "     Cursor → Python: Select Interpreter → C:\\spark-dev\\.venv\\Scripts\\python.exe\n"
+            "     Restart kernel, then run settings + bootstrap.\n\n"
+            "  B) Install into the current venv:\n"
+            "     .\\.venv\\Scripts\\Activate.ps1\n"
+            f"     pip install -r {req}\n"
+            "     Restart kernel, then run settings + bootstrap.\n\n"
+            "Verify: python scripts/check_env.py"
+        ) from exc
 
 
 def _local_settings() -> dict[str, Any]:
@@ -231,6 +255,9 @@ def _notebook_reload_io_helpers(
     """Reload common.io after git pull — keeps spark and in-memory DataFrames."""
     import importlib
 
+    _ensure_pyspark_installed()
+    from common import transforms
+
     importlib.reload(io)
     importlib.reload(transforms)
     ng = notebook_globals_override if notebook_globals_override is not None else notebook_globals
@@ -272,6 +299,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     import importlib
 
     from pyspark.sql import functions as F
+
+    _ensure_pyspark_installed()
+    from common import transforms
 
     importlib.reload(io)
     importlib.reload(transforms)
