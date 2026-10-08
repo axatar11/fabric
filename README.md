@@ -76,6 +76,7 @@ Local reads use **deltalake scan** and `az login` by default. Table paths and la
 | Scala / `GenTraversableOnce` | `pip install pyspark==3.5.4 delta-spark==3.2.0`; clear `SPARK_HOME` |
 | Stale Spark session | Restart kernel or `$env:MEDALLION_FRESH_SPARK = "1"` before bootstrap |
 | OneLake auth | `az login` |
+| `PermissionError` on bootstrap (PySpark `Temp\\…`) | Restart kernel; set `$env:MEDALLION_FRESH_SPARK="1"`; optional `$env:MEDALLION_SPARK_TMP="$env:USERPROFILE\.fabric\spark_tmp"`. Close other notebooks using Spark. |
 
 ## Fabric (cloud)
 
