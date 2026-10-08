@@ -395,7 +395,7 @@ def _read_delta_via_deltalake_scan(
 
 
 def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
-    """Azure CLI + deltalake (Fabric endpoint) -> Spark DataFrame; same auth as NB_Cursor_Bronze."""
+    """Azure CLI + deltalake (Fabric endpoint) -> Spark DataFrame."""
     from deltalake import DeltaTable
 
     from common.fabric_storage import fabric_storage_options
@@ -403,7 +403,7 @@ def _read_delta_via_deltalake(spark: SparkSession, path: str) -> DataFrame:
     _read_debug(f"read_table: deltalake open {path}")
     dt = DeltaTable(path, storage_options=fabric_storage_options())
     _read_debug("read_table: deltalake loading data...")
-    # PySpark createDataFrame(pyarrow Table) can yield all-NULL rows; pandas bridge matches NB_Cursor_Bronze.
+    # PySpark createDataFrame(pyarrow Table) can yield all-NULL rows; pandas bridge is safer.
     spark_schema = _deltalake_schema_to_spark(dt)
     pdf = _pandas_for_spark_schema(dt.to_pandas(), spark_schema)
     _read_debug(f"read_table: {len(pdf)} rows -> Spark")

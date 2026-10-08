@@ -1,4 +1,4 @@
-"""Reusable Spark column transforms for HC, Okta, and Cursor pipelines."""
+"""Reusable Spark column transforms for HC, Okta, and cursor_usage pipelines."""
 
 from __future__ import annotations
 

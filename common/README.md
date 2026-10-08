@@ -19,7 +19,7 @@ Loaded by **`%run ./common/bootstrap`** in pipeline notebooks. Do not import the
 
 ## `config.py`
 
-Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), Cursor gold constants, merge key column names. Override via env (`LAKEHOUSE_*`, etc.) or optional `local_settings.py`.
+Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` constants, merge key column names. Override via env (`LAKEHOUSE_*`, etc.) or optional `local_settings.py`.
 
 ---
 
@@ -50,7 +50,7 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), Cursor gold constants,
 | **`break_lineage_local(df, label)`** | Write/read local parquet under `merge_staging/_break/` to cut Spark lineage. |
 | **`publish_merge_staging(df, fqn)`** | Write transform result to `merge_staging/` for merge/overwrite. |
 | **`write_full_table(df, fqn)`** | Full **overwrite** silver tables (HC/Okta) via staging → deltalake. |
-| **`merge_incremental(spark, df, fqn, key)`** | Delta **merge** (Cursor silver, gold facts) from staging parquet chunks. |
+| **`merge_incremental(spark, df, fqn, key)`** | Delta **merge** (cursor_usage silver, gold facts) from staging parquet chunks. |
 
 ---
 
@@ -63,7 +63,7 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), Cursor gold constants,
 | **`date_from_yyyymm(col)`** | `Month_No` int → first day of month date. |
 | **`load_country_lookup(spark, TABLE_COUNTRY)`** | Country → display name for normalization. |
 | **`with_normalized_country(df, …)`** | Left join lookup; default `No Country`. |
-| **`join_okta_for_cursor_usage` / `join_hc_for_cursor_usage`** | Equi-join helpers (optional; Cursor silver notebook inlines joins). |
+| **`join_okta_for_cursor_usage` / `join_hc_for_cursor_usage`** | Equi-join helpers (optional; cursor_usage silver notebook inlines joins). |
 | **`cursor_usage_record_key()`** | SHA2 merge key for **silver** cursor_usage rows. |
 | **`cursor_active_daily_aggregate(silver)`** | Gold active: group by date + Okta user, `COUNT(*)` Request. |
 | **`cursor_active_daily_merge_key()`** | SHA2 key per (date, Okta user) for gold active. |

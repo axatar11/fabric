@@ -1,4 +1,4 @@
-"""Catalog FQNs, lakehouse IDs, and business constants for HC / Okta / Cursor pipelines.
+"""Catalog FQNs, lakehouse IDs, and business constants for HC / Okta / cursor_usage pipelines.
 
 Injected into notebooks by ``bootstrap.init_notebook`` (names in ``CONFIG_NAMES``).
 """
