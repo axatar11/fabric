@@ -24,20 +24,14 @@ def _ensure_pyspark_installed() -> None:
     except ModuleNotFoundError as exc:
         req = _REPO / "requirements-local-spark.txt"
         raise RuntimeError(
-            "PySpark is not installed in the Python used by this notebook kernel.\n\n"
-            f"  Kernel Python: {sys.executable}\n"
-            f"  Repo root:       {_REPO}\n\n"
-            "A new repo folder often gets a new empty .venv — that does NOT copy packages "
-            "from the old repo.\n\n"
-            "Fix (pick one):\n"
-            "  A) Reuse the working venv from the old setup:\n"
-            "     VS Code → Python: Select Interpreter → C:\\spark-dev\\.venv\\Scripts\\python.exe\n"
-            "     Restart kernel, then run settings + bootstrap.\n\n"
-            "  B) Install into the current venv:\n"
-            "     .\\.venv\\Scripts\\Activate.ps1\n"
-            f"     pip install -r {req}\n"
-            "     Restart kernel, then run settings + bootstrap.\n\n"
-            "Verify: python scripts/check_env.py"
+            "PySpark is not installed for this notebook kernel.\n\n"
+            f"  Kernel: {sys.executable}\n"
+            f"  Repo:   {_REPO}\n\n"
+            "Use the .venv in this repo and install dependencies:\n"
+            f"  pip install -r {req}\n\n"
+            "VS Code → Python: Select Interpreter → "
+            "<repo>\\.venv\\Scripts\\python.exe, then restart the kernel.\n"
+            "Check: python scripts/check_env.py"
         ) from exc
 
 
@@ -364,7 +358,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         f"path_reads={io._use_path_reads()} onelake_read={read_mode}"
     )
     if io._use_path_reads():
-        print(f"Repo root: {repo_root()}  (open this folder as the workspace; see README)")
+        print(f"Repo root: {repo_root()}")
     jars = info.get("jar_packages")
     if jars:
         print(f"spark.jars.packages={jars}")
