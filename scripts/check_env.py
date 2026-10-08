@@ -34,8 +34,7 @@ if missing:
     print("Install (PowerShell):")
     print(f"  pip install -r {REQ}")
     print()
-    print("In VS Code: Python: Select Interpreter → pick the same python.exe as above.")
-    print("Restart the notebook kernel after install.")
+    print("VS Code: Python: Select Interpreter → this python.exe, then restart the notebook kernel.")
     sys.exit(1)
 
 import pyspark
