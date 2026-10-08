@@ -11,9 +11,102 @@ Bronze → Silver → Gold for HC, Okta, and Cursor usage.
 | `gold/` | `NB_CursorUsage_Gold`, `NB_CursorOnboard_Gold` |
 | `common/` | Shared bootstrap, config, I/O, transforms — see **`common/README.md`** |
 
-Open notebooks from **`silver/`** or **`gold/`** in Fabric/Jupyter (repo root = notebook working directory for `%run`).
+Open notebooks from **`silver/`** or **`gold/`**. The first settings cell moves the kernel to the **repo root** when needed so `%run ./common/bootstrap` works.
 
-## Entry (every table notebook — run in order after kernel restart)
+---
+
+## New users: folder path and Python environment (Windows)
+
+### 1. Where the repo should live
+
+Use this clone path (CoE standard):
+
+```text
+C:\spark-dev\CoE_transformation_framework\
+├── common\
+├── silver\
+├── gold\
+├── scripts\
+└── requirements-local-spark.txt
+```
+
+Clone or sync the Git repo into **`C:\spark-dev\CoE_transformation_framework`**.  
+Do **not** rely on the old nested path `C:\spark-dev\fabric\fabric\`.
+
+In **Cursor / VS Code**: **File → Open Folder** → select `C:\spark-dev\CoE_transformation_framework` (the folder that contains `common` and `silver`).
+
+### 2. Choose a virtual environment (pick one)
+
+| Option | Venv location | When to use |
+|--------|----------------|-------------|
+| **A — Shared (recommended)** | `C:\spark-dev\.venv` | One env for CoE / multiple repos under `C:\spark-dev` |
+| **B — Repo-local** | `C:\spark-dev\CoE_transformation_framework\.venv` | Isolated deps only for this repo |
+
+**Python version:** **3.11 or 3.12** only (not 3.13+). PySpark **3.5.4** + **delta-spark 3.2.0**.
+
+**Create shared venv (option A):**
+
+```powershell
+cd C:\spark-dev
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r CoE_transformation_framework\requirements-local-spark.txt
+python CoE_transformation_framework\scripts\verify_local_spark.py
+```
+
+**Create repo-local venv (option B):**
+
+```powershell
+cd C:\spark-dev\CoE_transformation_framework
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-local-spark.txt
+python scripts\verify_local_spark.py
+```
+
+### 3. Point the IDE at the correct interpreter
+
+After opening the **`CoE_transformation_framework`** folder:
+
+1. **Ctrl+Shift+P** → **Python: Select Interpreter**
+2. Choose:
+   - `C:\spark-dev\.venv\Scripts\python.exe` (shared), or
+   - `C:\spark-dev\CoE_transformation_framework\.venv\Scripts\python.exe` (local)
+
+For notebooks: pick the **same** interpreter as the **Jupyter kernel** (top-right kernel picker). If kernels are missing:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install ipykernel
+python -m ipykernel install --user --name coe-medallion --display-name "CoE Medallion (Py3.12)"
+```
+
+Then select kernel **CoE Medallion (Py3.12)** in the notebook.
+
+Optional: set **`MEDALLION_PYTHON`** to a specific `python.exe` before running `reinstall_local_spark.ps1`.
+
+Workspace defaults (`.vscode/settings.json`) assume shared venv at `C:\spark-dev\.venv`; change that path if you use option B.
+
+### 4. Azure login (required for local OneLake reads/writes)
+
+```powershell
+az login
+```
+
+### 5. Run pipelines
+
+1. Open e.g. `silver\NB_HCHistorical_Bronze_To_Silver.ipynb`
+2. **Kernel restart** after any env or git change
+3. Run **settings** cell → **bootstrap** → remaining cells
+
+Bootstrap prints **`Repo root:`** — it should be `C:\spark-dev\CoE_transformation_framework`. If not, you opened the wrong folder or the settings cell could not find `common\bootstrap.py`.
+
+**Run order:**  
+`silver/NB_HCHistorical_Bronze_To_Silver` → `silver/NB_OktaUserforAI_Bronze_To_Silver` → `silver/NB_CursorUsage_Bronze_To_Silver` → `gold/NB_CursorUsage_Gold` → `gold/NB_CursorOnboard_Gold`.
+
+---
+
+## Entry (every table notebook)
 
 **Cell 1 — local read/cache settings** (must run before bootstrap):
 
@@ -30,82 +123,56 @@ os.environ.setdefault("MEDALLION_SCAN_RETRIES", "6")
 **Cell 2 — bootstrap:**
 
 ```python
-# Settings cell chdirs to repo root when the kernel starts in silver/ or gold/
 %run ./common/bootstrap
 ```
 
-Run notebooks **one table at a time** (no all-in-one orchestration notebook):  
-`silver/NB_HCHistorical_Bronze_To_Silver` → `silver/NB_OktaUserforAI_Bronze_To_Silver` → `silver/NB_CursorUsage_Bronze_To_Silver` → `gold/NB_CursorUsage_Gold` → `gold/NB_CursorOnboard_Gold`.
+That loads **`common/`** (see **`common/README.md`**).
 
-That loads **`common/`** only:
+**Local OneLake reads**: `az login`, then `read_table()` using **deltalake `scan()`** by default.
 
-| File | Role |
-|------|------|
-| `bootstrap.py` | Reuse or create `spark`, inject `F`, table names, I/O + transforms |
-| `config.py` | Lakehouse IDs and `TABLE_*` names |
-| `io.py` | Delta overwrite + merge |
-| `transforms.py` | Shared column logic |
+You do **not** need `local_settings.py` for default tables — paths are in `config.py`. Copy `common/local_settings.example.py` → `common/local_settings.py` only for overrides.
 
-**Local OneLake reads**: `az login`, then `read_table()` / `load_delta_path()` using **deltalake `scan()`** (column mapping, no PySpark abfss hang) → Spark DataFrame. Force Fabric-style PySpark load: `$env:MEDALLION_PYSPARK_ABFSS_READ = "1"`.
-
-```powershell
-az login
-pip install -r fabric\fabric\requirements-local-spark.txt
-```
-
-You do **not** need `local_settings.py` for default tables — paths are built in `config.py` (same as your Fabric ABFS path for cursor bronze). Copy `local_settings.example.py` → `local_settings.py` only to override paths or Spark.
-
-Table registration (`CREATE TABLE … LOCATION abfss://…`) is **off** by default (it caused catalog/Scala errors on many local setups). Turn on only if you need it:
+Table registration (`CREATE TABLE … LOCATION abfss://…`) is **off** by default:
 
 ```powershell
 $env:MEDALLION_REGISTER_TABLES = "1"
 ```
 
-## Local setup (Windows)
+---
+
+## Local setup troubleshooting
+
+If verify fails with `cannot import name '_with_origin'` (corrupted PySpark):
 
 ```powershell
-cd C:\spark-dev
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r fabric\fabric\requirements-local-spark.txt
-python fabric\fabric\scripts\verify_local_spark.py
+cd C:\spark-dev\CoE_transformation_framework
+.\scripts\reinstall_local_spark.ps1
+# Uses C:\spark-dev\.venv if present, else creates .venv near repo (see script output).
+# In-place pip only: .\scripts\reinstall_local_spark.ps1 -KeepVenv
 ```
 
-If verify fails with `cannot import name '_with_origin'` (or similar), PySpark is **corrupted** — reinstall, do not upgrade in place:
+Use **PySpark 3.5.x**. If you see `GenTraversableOnce` / Scala errors:
 
 ```powershell
-.\fabric\fabric\scripts\reinstall_local_spark.ps1
-# Deletes .venv under C:\spark-dev (or nearest parent), recreates it, pip install -r requirements-local-spark.txt, runs verify.
-# In-place pip only: .\reinstall_local_spark.ps1 -KeepVenv
+pip install pyspark==3.5.4 delta-spark==3.2.0
+Remove-Item Env:SPARK_HOME -ErrorAction SilentlyContinue
 ```
 
-Use **PySpark 3.5.x** with **Spark 3.5** (`SPARK_HOME`). If you see `GenTraversableOnce` / `scala.collection.*` on `spark.table`:
+Other tips:
 
-1. **Version mix** — pip PySpark 4.x with `SPARK_HOME` Spark 3.x (or the reverse). Fix:
-   ```powershell
-   pip install pyspark==3.5.4 delta-spark==3.2.0
-   Remove-Item Env:SPARK_HOME -ErrorAction SilentlyContinue
-   ```
-   Or set `MEDALLION_USE_SPARK_HOME=1` only when both versions match.
+- **Stale session** — restart kernel, or `$env:MEDALLION_FRESH_SPARK = "1"` before bootstrap.
+- **Auth errors** — `az login`; Azure CLI must be on PATH (bootstrap prepends the default Windows install path when present).
+- **Force Spark ABFS reads** (optional): `$env:MEDALLION_PYSPARK_ABFSS_READ = "1"`.
 
-2. **Stale session** — restart kernel, or before bootstrap: `$env:MEDALLION_FRESH_SPARK = "1"`.
+---
 
-3. **Reads** — locally `read_table()` uses **azure-cli+deltalake** (bootstrap banner). Not `spark.table()`. Run **`az login`** first.
+## Fabric (cloud)
 
-4. **Auth errors on read** — sign in with Azure CLI (`az login`). Ensure Azure CLI is installed (bootstrap prepends the default Windows Azure CLI path when present).
-
-5. **Force Spark ABFS reads** (optional, needs service principal + hadoop-azure JARs): `$env:MEDALLION_SPARK_DELTA_READ = "1"` plus OAuth env vars — not the default.
-
-Run `python scripts/verify_local_spark.py` in your venv to sanity-check Spark before opening a notebook.
-
-Open each `NB_*` notebook in pipeline order and run all cells (settings → bootstrap → reads/writes).
-
-## Fabric
-
-Sync repo including `common/`. Run the local settings cell (optional on Fabric), then `%run ./common/bootstrap`. Attached lakehouse provides tables; no local OAuth unless you run locally.
+Sync repo including `common/`. Run settings (optional), then `%run ./common/bootstrap`. Attached lakehouse provides tables; no local OAuth unless you run locally.
 
 ## Maintenance
 
 ```powershell
+cd C:\spark-dev\CoE_transformation_framework
 python scripts\sync_notebooks_to_entry.py
 ```
