@@ -30,7 +30,8 @@ os.environ.setdefault("MEDALLION_SCAN_RETRIES", "6")
 **Cell 2 — bootstrap:**
 
 ```python
-%run ../common/bootstrap
+# Settings cell chdirs to repo root when the kernel starts in silver/ or gold/
+%run ./common/bootstrap
 ```
 
 Run notebooks **one table at a time** (no all-in-one orchestration notebook):  
@@ -101,7 +102,7 @@ Open each `NB_*` notebook in pipeline order and run all cells (settings → boot
 
 ## Fabric
 
-Sync repo including `common/`. Run the local settings cell (optional on Fabric), then `%run ../common/bootstrap` from a notebook under `silver/` or `gold/`. Attached lakehouse provides tables; no local OAuth unless you run locally.
+Sync repo including `common/`. Run the local settings cell (optional on Fabric), then `%run ./common/bootstrap`. Attached lakehouse provides tables; no local OAuth unless you run locally.
 
 ## Maintenance
 

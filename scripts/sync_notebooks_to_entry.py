@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ENTRY = "%run ../common/bootstrap\n"
+ENTRY = "%run ./common/bootstrap\n"
 
 
 def load_nb(path: Path) -> dict:
@@ -58,7 +58,7 @@ def main() -> None:
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
         save_nb(ROOT / name, nb)
-    print("Notebooks point to ../common/bootstrap")
+    print("Notebooks point to ./common/bootstrap (settings cell chdirs to repo root)")
 
 
 if __name__ == "__main__":
