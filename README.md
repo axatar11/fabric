@@ -6,12 +6,12 @@ Bronze → Silver → Gold for HC, Okta, and cursor_usage.
 
 | Folder | Notebooks |
 |--------|-----------|
-| `bronze/` | (ingest in Fabric — no pipeline notebooks) |
-| `silver/` | `NB_HCHistorical_Bronze_To_Silver`, `NB_OktaUserforAI_Bronze_To_Silver`, `NB_CursorUsage_Bronze_To_Silver` |
-| `gold/` | `NB_CursorUsage_Gold`, `NB_CursorOnboard_Gold` |
+| `Notebook/Bronze/` | (ingest in Fabric — no pipeline notebooks) |
+| `Notebook/Silver/` | `NB_HCHistorical_Bronze_To_Silver`, `NB_OktaUserforAI_Bronze_To_Silver`, `NB_CursorUsage_Bronze_To_Silver` |
+| `Notebook/Gold/` | `NB_CursorUsage_Gold`, `NB_CursorOnboard_Gold` |
 | `common/` | Bootstrap, config, I/O, transforms — see **`common/README.md`** |
 
-Open this repository as the VS Code workspace root (the folder that contains `common` and `silver`). Notebook settings cells adjust the working directory when needed so `%run ./common/bootstrap` resolves correctly.
+Open this repository as the VS Code workspace root (the folder that contains `common` and `Notebook`). Notebook settings cells adjust the working directory when needed so `%run ./common/bootstrap` resolves correctly.
 
 ## Local development (Windows)
 
@@ -63,7 +63,7 @@ os.environ.setdefault("MEDALLION_SCAN_RETRIES", "6")
 ```
 
 **Order:**  
-`silver/NB_HCHistorical_Bronze_To_Silver` → `silver/NB_OktaUserforAI_Bronze_To_Silver` → `silver/NB_CursorUsage_Bronze_To_Silver` → `gold/NB_CursorUsage_Gold` → `gold/NB_CursorOnboard_Gold`.
+`Notebook/Silver/NB_HCHistorical_Bronze_To_Silver` → `Notebook/Silver/NB_OktaUserforAI_Bronze_To_Silver` → `Notebook/Silver/NB_CursorUsage_Bronze_To_Silver` → `Notebook/Gold/NB_CursorUsage_Gold` → `Notebook/Gold/NB_CursorOnboard_Gold`.
 
 Local reads use **deltalake scan** and `az login` by default. Table paths and lakehouse IDs are in `common/config.py`. Optional overrides: `common/local_settings.py` (see `local_settings.example.py`).
 
