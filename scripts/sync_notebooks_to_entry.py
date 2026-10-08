@@ -44,16 +44,16 @@ def set_bootstrap_cell(nb: dict) -> None:
 
 def main() -> None:
     for name in (
-        "silver/NB_HCHistorical_Bronze_To_Silver.ipynb",
-        "silver/NB_OktaUserforAI_Bronze_To_Silver.ipynb",
-        "silver/NB_CursorUsage_Bronze_To_Silver.ipynb",
+        "Notebook/Silver/NB_HCHistorical_Bronze_To_Silver.ipynb",
+        "Notebook/Silver/NB_OktaUserforAI_Bronze_To_Silver.ipynb",
+        "Notebook/Silver/NB_CursorUsage_Bronze_To_Silver.ipynb",
     ):
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
         save_nb(ROOT / name, nb)
     for name in (
-        "gold/NB_CursorUsage_Gold.ipynb",
-        "gold/NB_CursorOnboard_Gold.ipynb",
+        "Notebook/Gold/NB_CursorUsage_Gold.ipynb",
+        "Notebook/Gold/NB_CursorOnboard_Gold.ipynb",
     ):
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)

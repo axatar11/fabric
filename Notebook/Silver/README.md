@@ -6,4 +6,4 @@ Run in order:
 2. `NB_OktaUserforAI_Bronze_To_Silver.ipynb`
 3. `NB_CursorUsage_Bronze_To_Silver.ipynb` (requires HC + Okta silver)
 
-Then run notebooks under `gold/`.
+Then run notebooks under `Notebook/Gold/`.
