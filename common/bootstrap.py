@@ -326,11 +326,15 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         read_mode = "pyspark-delta-load"
     else:
         read_mode = "deltalake-scan"
+    from common.paths import repo_root
+
     print(
         f"Bootstrap OK: runtime={info.get('runtime')} mode={info.get('mode')} "
         f"spark={spark.version} pyspark={pyspark.__version__} "
         f"path_reads={io._use_path_reads()} onelake_read={read_mode}"
     )
+    if io._use_path_reads():
+        print(f"Repo root: {repo_root()}  (open this folder as the workspace; see README)")
     jars = info.get("jar_packages")
     if jars:
         print(f"spark.jars.packages={jars}")

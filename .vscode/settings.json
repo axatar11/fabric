@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "C:\\spark-dev\\.venv\\Scripts\\python.exe",
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "jupyter.jupyterServerType": "local",
+  "terminal.integrated.cwd": "${workspaceFolder}"
+}

@@ -1,5 +1,6 @@
 # Recreates .venv with Python 3.12 (PySpark 3.5 does not support 3.14).
-# Usage: .\reinstall_local_spark.ps1
+# Run from repo root, e.g. C:\spark-dev\CoE_transformation_framework:
+#   .\scripts\reinstall_local_spark.ps1
 
 param(
     [switch]$KeepVenv,

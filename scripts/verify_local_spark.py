@@ -19,16 +19,18 @@ PowerShell (venv activated):
 
 Use Python 3.11 or 3.12 (not 3.14). If it still fails, recreate the venv:
 
-  cd C:\\spark-dev
+  cd C:\\spark-dev\\CoE_transformation_framework
   Remove-Item -Recurse -Force .venv
   py -3.12 -m venv .venv
   .\\.venv\\Scripts\\Activate.ps1
-  pip install -r fabric\\fabric\\requirements-local-spark.txt
+  pip install -r requirements-local-spark.txt
+
+Or use a shared venv at C:\\spark-dev\\.venv (see README).
 
 Then:
 
   Remove-Item Env:SPARK_HOME -ErrorAction SilentlyContinue
-  python fabric\\fabric\\scripts\\verify_local_spark.py
+  python scripts\\verify_local_spark.py
 """
 
 
