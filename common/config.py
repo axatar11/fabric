@@ -1,4 +1,7 @@
-"""Catalog, table names, and pipeline constants."""
+"""Catalog FQNs, lakehouse IDs, and business constants for HC / Okta / Cursor pipelines.
+
+Injected into notebooks by ``bootstrap.init_notebook`` (names in ``CONFIG_NAMES``).
+"""
 
 from __future__ import annotations
 

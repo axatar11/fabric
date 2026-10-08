@@ -1,4 +1,4 @@
-"""OneLake access via Azure CLI — same pattern as NB_Cursor_Bronze.ipynb."""
+"""Azure CLI tokens and Spark/deltalake config for OneLake (Fabric) storage."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ _HADOOP_CONF_TOKEN_EXPIRY = "org.fabric.onelake.token.expiry"
 
 
 def onelake_cli_token_jar() -> str:
+    """File URI of the Hadoop ABFS token provider JAR bundled under ``common/jars/``."""
     if not _ONELAKE_CLI_JAR.is_file():
         raise FileNotFoundError(
             f"Missing {_ONELAKE_CLI_JAR}. Pull latest repo (PySpark OneLake token JAR)."
@@ -26,6 +27,7 @@ def onelake_cli_token_jar() -> str:
 
 
 def ensure_azure_cli_on_path() -> None:
+    """Prepend default Windows Azure CLI install dir to ``PATH`` when present."""
     if os.path.isdir(_AZURE_CLI_WIN):
         path = os.environ.get("PATH", "")
         if _AZURE_CLI_WIN not in path.split(os.pathsep):
@@ -33,6 +35,7 @@ def ensure_azure_cli_on_path() -> None:
 
 
 def azure_cli_access_token() -> tuple[str, int]:
+    """Return ``(access_token, expires_on_unix)`` from ``AzureCliCredential``."""
     from azure.identity import AzureCliCredential
 
     ensure_azure_cli_on_path()
@@ -46,6 +49,7 @@ def azure_cli_access_token() -> tuple[str, int]:
 
 
 def abfs_token_cache_path() -> Path:
+    """Path where the current ABFS bearer token is written for the JVM."""
     override = os.environ.get("ONELAKE_TOKEN_CACHE")
     if override:
         return Path(override)

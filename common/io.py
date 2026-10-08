@@ -1,3 +1,5 @@
+"""OneLake read/write, local parquet cache, and merge staging for pipeline notebooks."""
+
 from __future__ import annotations
 
 import os
@@ -12,7 +14,7 @@ if TYPE_CHECKING:
 
 
 def onelake_table_path(lakehouse_id: str, *subpath: str) -> str:
-    """Same abfss layout as NB_Cursor_Bronze (guid/Tables/..., no .Lakehouse suffix)."""
+    """Build ``abfss://{workspace}@onelake…/{lakehouse}/Tables/…`` path."""
     suffix = ".Lakehouse" if os.environ.get("ONELAKE_LAKEHOUSE_SUFFIX", "").lower() in (
         "1",
         "true",
@@ -31,6 +33,7 @@ def _default_gold_table_fqn(table_name: str) -> str:
 
 
 def delta_path_for_table(table_fqn: str) -> str | None:
+    """Resolve a catalog FQN (``TABLE_*``) to a OneLake Delta abfss path."""
     from common import config
 
     med = config.LAKEHOUSE_AI_MEDALLION_ID
@@ -526,7 +529,7 @@ def _write_local_cache(df: DataFrame, table_fqn: str) -> None:
 
 
 def save_table_cache(df: DataFrame, table_fqn: str) -> Path:
-    """Persist an in-memory DataFrame locally (survives kernel restart)."""
+    """Write a DataFrame to ``medallion_cache`` (explicit cache; survives kernel restart)."""
     path = local_cache_path(table_fqn)
     try:
         _write_df_to_local_parquet(df, path)
@@ -647,6 +650,7 @@ def _materialize_local_checkpoint(spark: SparkSession, df: DataFrame) -> DataFra
 
 
 def merge_staging_path(table_fqn: str) -> Path:
+    """Local folder for merge/overwrite staging parquet (`~/.fabric/merge_staging/…`)."""
     safe = table_fqn.replace(".", "__")
     return Path.home() / ".fabric" / "merge_staging" / safe
 
@@ -762,6 +766,7 @@ def _deltalake_table_exists(path: str) -> bool:
 
 
 def write_full_table(df: DataFrame | None, table_name: str) -> None:
+    """Overwrite a Delta table (full load). Local: staging parquet → deltalake OneLake."""
     path = _onelake_delta_path(table_name)
     staging = merge_staging_path(table_name)
     if path and _use_deltalake_onelake_write():
@@ -794,6 +799,7 @@ def write_full_table(df: DataFrame | None, table_name: str) -> None:
 
 
 def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> None:
+    """Upsert via Delta merge on ``merge_key``. Expects ``publish_merge_staging`` output locally."""
     path = _onelake_delta_path(table_name)
     if path and _use_deltalake_onelake_write():
         from deltalake import DeltaTable, write_deltalake
