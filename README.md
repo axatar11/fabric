@@ -9,7 +9,7 @@ Bronze → Silver → Gold for HC, Okta, and Cursor usage.
 | `bronze/` | (ingest in Fabric — no pipeline notebooks) |
 | `silver/` | `NB_HCHistorical_Bronze_To_Silver`, `NB_OktaUserforAI_Bronze_To_Silver`, `NB_CursorUsage_Bronze_To_Silver` |
 | `gold/` | `NB_CursorUsage_Gold`, `NB_CursorOnboard_Gold` |
-| `common/` | Shared bootstrap, config, I/O, transforms |
+| `common/` | Shared bootstrap, config, I/O, transforms — see **`common/README.md`** |
 
 Open notebooks from **`silver/`** or **`gold/`** in Fabric/Jupyter (repo root = notebook working directory for `%run`).
 

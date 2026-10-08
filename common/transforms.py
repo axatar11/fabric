@@ -1,3 +1,5 @@
+"""Reusable Spark column transforms for HC, Okta, and Cursor pipelines."""
+
 from __future__ import annotations
 
 from pyspark.sql import Column, DataFrame
@@ -7,10 +9,12 @@ from common.config import NO_COUNTRY
 
 
 def trim_lower(col_name: str) -> Column:
+    """``lower(trim(col))`` expression."""
     return F.lower(F.trim(F.col(col_name)))
 
 
 def is_valid_email(col: Column) -> Column:
+    """Boolean column: non-empty value matching a simple email pattern."""
     normalized = F.lower(F.trim(col))
     return (
         col.isNotNull()
@@ -20,12 +24,14 @@ def is_valid_email(col: Column) -> Column:
 
 
 def date_from_yyyymm(month_no_col: Column) -> Column:
+    """Convert YYYYMM integer column to first-of-month ``date``."""
     year = (month_no_col / F.lit(100)).cast("int")
     month = (month_no_col % F.lit(100)).cast("int")
     return F.make_date(year, month, F.lit(1))
 
 
 def load_country_lookup(spark, country_table: str) -> DataFrame:
+    """Read country reference table; return ``Country`` / ``DisplayName`` key columns."""
     from common.io import read_table
 
     return read_table(spark, country_table).select(
@@ -40,6 +46,7 @@ def with_normalized_country(
     country_lookup: DataFrame,
     output_col: str = "OktaUserCountry",
 ) -> DataFrame:
+    """Map raw country to display name; use ``NO_COUNTRY`` when unmatched."""
     return (
         df.join(
             country_lookup,
@@ -127,6 +134,7 @@ def cursor_active_daily_merge_key() -> Column:
 
 
 def cursor_onboard_daily_dedupe(silver: DataFrame) -> DataFrame:
+    """Keep latest ingestion row per ``(CursorUsageDate, OktaUserId)``."""
     from pyspark.sql.window import Window
 
     w = Window.partitionBy("CursorUsageDate", "OktaUserId").orderBy(
@@ -140,6 +148,7 @@ def cursor_onboard_daily_dedupe(silver: DataFrame) -> DataFrame:
 
 
 def cursor_onboard_merge_key() -> Column:
+    """SHA2 surrogate key: ``CursorUsageDate | OktaUserId``."""
     return F.sha2(
         F.concat_ws(
             "|",
@@ -151,6 +160,7 @@ def cursor_onboard_merge_key() -> Column:
 
 
 def cursor_usage_record_key() -> Column:
+    """SHA2 row key for silver ``cursor_usage`` (event-level merge)."""
     parts = [
         F.coalesce(F.col("CursorUsageUser"), F.lit("")),
         F.coalesce(F.col("CursorUsageDate").cast("string"), F.lit("")),

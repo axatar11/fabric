@@ -1,4 +1,7 @@
-"""Notebook entry: `%run ./common/bootstrap` (settings cell ensures repo root cwd)."""
+"""Notebook entry: `%run ./common/bootstrap` — Spark session and injected helpers.
+
+See ``common/README.md`` for a short catalog of functions.
+"""
 
 from __future__ import annotations
 
@@ -164,6 +167,7 @@ def _get_spark(notebook_globals: dict[str, Any], app_name: str):
 
 
 def show_sample(df, n: int = 10) -> None:
+    """Show up to ``n`` rows (Fabric ``display`` or Spark ``show``)."""
     try:
         display(df.limit(n))  # noqa: F821
     except NameError:
@@ -248,6 +252,7 @@ def _notebook_reload_io_helpers(
 
 
 def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
+    """Reload ``io`` / ``transforms`` after code changes; keeps the same ``spark`` session."""
     _notebook_reload_io_helpers(notebook_globals)
 
 
@@ -263,6 +268,7 @@ def _bind_reload_io_helpers(notebook_globals: dict[str, Any]):
 
 
 def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion") -> None:
+    """Wire ``spark``, ``F``, config constants, and I/O/transform helpers into the notebook globals."""
     import importlib
 
     from pyspark.sql import functions as F
