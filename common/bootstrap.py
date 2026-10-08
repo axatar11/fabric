@@ -76,6 +76,29 @@ def _spark_home_version() -> str | None:
     return None
 
 
+def _ensure_spark_temp_dir() -> Path:
+    """Use a user-owned temp dir (Windows AV often blocks PySpark gateway files under system Temp)."""
+    override = os.environ.get("MEDALLION_SPARK_TMP")
+    tmp = Path(override) if override else Path.home() / ".fabric" / "spark_tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    resolved = str(tmp.resolve())
+    os.environ["TEMP"] = resolved
+    os.environ["TMP"] = resolved
+    os.environ["TMPDIR"] = resolved
+    return tmp
+
+
+def _stop_active_spark() -> None:
+    try:
+        from pyspark.sql import SparkSession
+
+        active = SparkSession.getActiveSession()
+        if active is not None:
+            active.stop()
+    except Exception:
+        pass
+
+
 def _prepare_pyspark_env() -> None:
     """Avoid pip PySpark + SPARK_HOME version mix (causes GenTraversableOnce / catalog errors)."""
     import pyspark
@@ -124,11 +147,9 @@ def _build_spark(app_name: str):
     from pyspark.sql import SparkSession
 
     if os.environ.get("MEDALLION_FRESH_SPARK") == "1":
-        try:
-            SparkSession.getActiveSession().stop()  # type: ignore[union-attr]
-        except Exception:
-            pass
+        _stop_active_spark()
 
+    spark_tmp = _ensure_spark_temp_dir()
     packages = _spark_jar_packages()
     if io._use_path_reads():
         fabric_storage.refresh_abfs_token_env()
@@ -146,11 +167,20 @@ def _build_spark(app_name: str):
     for k, v in _local_settings().get("spark_extra_config", {}).items():
         builder = builder.config(k, v)
     if io._use_path_reads():
+        jvm_tmp = spark_tmp.as_posix()
         builder = (
             builder.config("spark.sql.autoBroadcastJoinThreshold", "-1")
             .config("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
+            .config("spark.local.dir", str(spark_tmp / "local"))
+            .config("spark.driver.extraJavaOptions", f"-Djava.io.tmpdir={jvm_tmp}")
+            .config("spark.executor.extraJavaOptions", f"-Djava.io.tmpdir={jvm_tmp}")
         )
-    spark = builder.getOrCreate()
+    try:
+        spark = builder.getOrCreate()
+    except PermissionError:
+        _stop_active_spark()
+        _ensure_spark_temp_dir()
+        spark = builder.getOrCreate()
     if io._use_path_reads():
         fabric_storage.apply_azure_cli_abfs_conf(spark)
     spark.range(1).count()
