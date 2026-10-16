@@ -56,7 +56,7 @@ SKIP_DIR_NAMES = frozenset(
 )
 
 # File names skipped (basename match).
-SKIP_FILE_NAMES = frozenset({"local_settings.py"})
+SKIP_FILE_NAMES = frozenset({"local_settings.py", "sync_to_ado.py"})
 
 
 def _env_path(name: str) -> Path | None:

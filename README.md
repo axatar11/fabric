@@ -89,20 +89,3 @@ Sync repo including `Common/`. Run settings (optional), then `%run ./Common/boot
 cd C:\spark-dev\CoE_transformation_framework
 python Scripts\sync_notebooks_to_entry.py
 ```
-
-## Sync to Azure DevOps (file copy)
-
-After testing in the GitHub/agent clone, copy files into the ADO repo (no git/cherry-pick):
-
-```powershell
-cd C:\spark-dev\fabric\fabric
-python Scripts\sync_to_ado.py --dry-run
-python Scripts\sync_to_ado.py
-cd C:\spark-dev\CoE_Transformation_Framework
-git status
-git add -A
-git commit -m "Sync from fabric test repo"
-git push
-```
-
-Defaults: source `C:\spark-dev\fabric\fabric`, target `C:\spark-dev\CoE_Transformation_Framework`. Override with `--source` / `--target` or `MEDALLION_SYNC_SOURCE` / `MEDALLION_SYNC_TARGET`.
