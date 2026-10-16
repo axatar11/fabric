@@ -41,6 +41,7 @@ def delta_path_for_table(table_fqn: str) -> str | None:
     silver = config.LAKEHOUSE_AI_MEDALLION_SILVER_ID
     mapping = {
         config.TABLE_CURSOR_BRONZE: config.ONELAKE_CURSOR_BRONZE_PATH,
+        config.TABLE_PURVIEW_COPILOT_BRONZE: config.ONELAKE_PURVIEW_COPILOT_BRONZE_PATH,
         config.TABLE_HC_BRONZE: onelake_table_path(bronze, "dbo/HC_Bronze_Historical"),
         config.TABLE_OKTA_BRONZE: onelake_table_path(bronze, "dbo/CoreOktaUser"),
         config.TABLE_COUNTRY: onelake_table_path(
@@ -50,6 +51,9 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_HC_SILVER: onelake_table_path(med, "Silver/hc_silver_historical"),
         config.TABLE_OKTA_SILVER: onelake_table_path(med, "Silver/okta_user_for_ai"),
         config.TABLE_CURSOR_SILVER: onelake_table_path(med, "Silver/cursor_usage"),
+        config.TABLE_PURVIEW_COPILOT_SILVER: onelake_table_path(
+            med, "Silver/purview_copilot_usage"
+        ),
     }
     active_fqn = getattr(
         config, "TABLE_FACT_CURSOR_ACTIVE", _default_gold_table_fqn("fact_cursor_active")

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
+from pyspark.sql.types import ArrayType, BooleanType, StringType, StructField, StructType
 
-from Common.config import NO_COUNTRY
+from Common.config import HC_DIVISION_INC_DEFAULT, NO_COUNTRY
 
 
 def trim_lower(col_name: str) -> Column:
@@ -156,6 +157,364 @@ def cursor_onboard_merge_key() -> Column:
             F.coalesce(F.col("OktaUserId"), F.lit("")),
         ),
         256,
+    )
+
+
+def _bronze_column(df: DataFrame, *names: str) -> Column:
+    """Resolve a bronze column when Fabric uses PascalCase or snake_case."""
+    lower_map = {c.lower(): c for c in df.columns}
+    for name in names:
+        key = name.lower()
+        if key in lower_map:
+            return F.col(lower_map[key])
+    raise ValueError(f"Bronze table missing any of: {', '.join(names)}")
+
+
+def _bronze_column_or_null(df: DataFrame, *names: str, dtype: str = "string") -> Column:
+    """Like ``_bronze_column`` but returns typed null when the column is absent."""
+    lower_map = {c.lower(): c for c in df.columns}
+    for name in names:
+        key = name.lower()
+        if key in lower_map:
+            return F.col(lower_map[key])
+    return F.lit(None).cast(dtype)
+
+
+def purview_copilot_interaction_type(
+    app_identity: Column, agent_name: Column
+) -> Column:
+    """Classify Copilot interaction from AppIdentity / agent name."""
+    return (
+        F.when(app_identity.like("Copilot.Fabric.%"), F.lit("Power BI / Fabric"))
+        .when(app_identity.like("Copilot.Studio.%"), F.lit("Copilot Studio Agent"))
+        .when(agent_name.isin("Analyst", "Researcher"), F.lit("Specialized Agent"))
+        .when(app_identity.like("MicrosoftAgent.%"), F.lit("Built-in Agent"))
+        .when(
+            app_identity.isin(
+                "Copilot.M365Copilot.WebChat",
+                "Copilot.M365Copilot.Bizchat",
+            ),
+            F.lit("Web Chat"),
+        )
+        .when(app_identity == "Copilot.M365Copilot.Apps", F.lit("Microsoft 365 App"))
+        .otherwise(F.lit("Other"))
+    )
+
+
+def join_okta_on_user_email(
+    base: DataFrame, okta_slim: DataFrame, user_email_col: str
+) -> DataFrame:
+    """Inner join Okta on short or full email (equi-joins only)."""
+    user = F.col(user_email_col)
+    on_login = base.join(okta_slim, user == okta_slim.OktaUserEmail, "inner")
+    on_full = base.join(okta_slim, user == okta_slim.OktaUserFullEmail, "inner")
+    return on_login.unionByName(on_full).dropDuplicates()
+
+
+def join_hc_on_email_keys(
+    joined: DataFrame,
+    hc_slim: DataFrame,
+    key_email_col: str,
+    key_full_email_col: str,
+    division_inc_default: str = HC_DIVISION_INC_DEFAULT,
+) -> DataFrame:
+    """Left attach HC attributes using monthly email keys."""
+    hc_attrs = [c for c in hc_slim.columns if c != "HCKeyEmail"]
+    with_email = joined.join(
+        hc_slim,
+        F.col(key_email_col) == hc_slim.HCKeyEmail,
+        "left",
+    )
+    hc_alt = hc_slim.select(
+        F.col("HCKeyEmail").alias("_hc_alt_key"),
+        *[F.col(c).alias(f"_hc_alt_{c}") for c in hc_attrs],
+    )
+    with_both = with_email.join(
+        hc_alt,
+        F.col(key_full_email_col) == hc_alt._hc_alt_key,
+        "left",
+    )
+    for name in hc_attrs:
+        alt = f"_hc_alt_{name}"
+        if alt in with_both.columns:
+            with_both = with_both.withColumn(
+                name, F.coalesce(F.col(name), F.col(alt))
+            )
+    drop_cols = ["_hc_alt_key", *[f"_hc_alt_{c}" for c in hc_attrs]]
+    with_both = with_both.drop(*[c for c in drop_cols if c in with_both.columns])
+    return with_both.withColumn(
+        "HCDivisionINC",
+        F.coalesce(F.col("HCDivisionINC"), F.lit(division_inc_default)),
+    )
+
+
+def build_purview_copilot_usage_silver(
+    bronze: DataFrame,
+    okta: DataFrame,
+    hc: DataFrame,
+    *,
+    min_creation_date: str,
+) -> DataFrame:
+    """Bronze purview_copilot_usage → silver grain (one row per record_id) with Okta + HC."""
+    audit = _bronze_column(bronze, "AuditData", "audit_data")
+    record_id = _bronze_column(bronze, "RecordId", "record_id")
+    creation = F.to_timestamp(F.trim(_bronze_column(bronze, "CreationDate", "creation_date")))
+    creation_date = creation.cast("date")
+    file_name = _bronze_column_or_null(bronze, "FileName", "file_name", "string")
+    ingestion = _bronze_column_or_null(
+        bronze, "IngestionDate", "ingestion_date", "timestamp"
+    ).cast("timestamp")
+    user_id = _bronze_column(bronze, "UserId", "user_id")
+
+    msg_type = ArrayType(
+        StructType(
+            [
+                StructField("isPrompt", BooleanType(), True),
+                StructField("JailbreakDetected", BooleanType(), True),
+            ]
+        )
+    )
+    plugin_type = ArrayType(
+        StructType([StructField("Id", StringType(), True)])
+    )
+    resource_type = ArrayType(StringType())
+
+    audit_json = audit.cast("string")
+    messages_json = F.get_json_object(audit_json, "$.CopilotEventData.Messages")
+    plugins_json = F.get_json_object(audit_json, "$.CopilotEventData.AISystemPlugin")
+    resources_json = F.get_json_object(audit_json, "$.CopilotEventData.AccessedResources")
+
+    app_identity = F.get_json_object(audit_json, "$.AppIdentity")
+    application_name = F.get_json_object(audit_json, "$.ApplicationName")
+    agent_name = F.get_json_object(audit_json, "$.AgentName")
+
+    base = (
+        bronze.filter(creation_date >= F.lit(min_creation_date))
+        .filter(is_valid_email(F.trim(user_id)))
+        .select(
+            record_id.alias("purview_copilot_usage_record_id"),
+            creation_date.alias("purview_copilot_usage_date"),
+            _bronze_column(bronze, "RecordType", "record_type").cast("int").alias(
+                "purview_copilot_usage_record_type"
+            ),
+            _bronze_column(bronze, "Operation", "operation").alias(
+                "purview_copilot_usage_operation"
+            ),
+            F.lower(F.trim(user_id)).alias("purview_copilot_usage_email"),
+            _bronze_column(
+                bronze, "AssociatedAdminUnits", "associated_admin_units"
+            ).alias("purview_copilot_usage_associated_admin_units"),
+            _bronze_column(
+                bronze, "AssociatedAdminUnitsNames", "associated_admin_units_names"
+            ).alias("purview_copilot_usage_associated_admin_units_names"),
+            app_identity.alias("purview_copilot_usage_app_identity"),
+            application_name.alias("purview_copilot_usage_application_name"),
+            F.get_json_object(audit_json, "$.CopilotEventData.AppHost").alias(
+                "purview_copilot_usage_app_host"
+            ),
+            agent_name.alias("purview_copilot_usage_agent_name"),
+            F.get_json_object(audit_json, "$.CopilotEventData.TargetAgentName").alias(
+                "purview_copilot_usage_target_agent_name"
+            ),
+            F.get_json_object(audit_json, "$.CopilotEventData.LicenseType").alias(
+                "purview_copilot_usage_license_type"
+            ),
+            F.get_json_object(audit_json, "$.CopilotEventData.ConversationId").alias(
+                "purview_copilot_usage_conversation_id"
+            ),
+            F.get_json_object(audit_json, "$.CopilotEventData.ThreadId").alias(
+                "purview_copilot_usage_thread_id"
+            ),
+            F.get_json_object(
+                audit_json, "$.CopilotEventData.ModelTransparencyDetails[0].ModelName"
+            ).alias("purview_copilot_usage_model_name"),
+            F.get_json_object(
+                audit_json,
+                "$.CopilotEventData.ModelTransparencyDetails[0].ModelProviderName",
+            ).alias("purview_copilot_usage_model_provider_name"),
+            F.get_json_object(audit_json, "$.CopilotLogVersion").alias(
+                "purview_copilot_usage_copilot_log_version"
+            ),
+            file_name.alias("purview_copilot_usage_file_name"),
+            ingestion.alias("purview_copilot_usage_ingestion_date"),
+            messages_json.alias("_messages_json"),
+            plugins_json.alias("_plugins_json"),
+            resources_json.alias("_resources_json"),
+        )
+        .withColumn(
+            "_messages",
+            F.from_json(F.col("_messages_json"), msg_type),
+        )
+        .withColumn(
+            "_plugins",
+            F.from_json(F.col("_plugins_json"), plugin_type),
+        )
+        .withColumn(
+            "_resources",
+            F.from_json(F.col("_resources_json"), resource_type),
+        )
+        .withColumn(
+            "purview_copilot_usage_message_count",
+            F.when(F.col("_messages").isNull(), 0).otherwise(F.size(F.col("_messages"))),
+        )
+        .withColumn(
+            "purview_copilot_usage_prompt_count",
+            F.when(F.col("_messages").isNull(), 0).otherwise(
+                F.expr("size(filter(_messages, x -> x.isPrompt))")
+            ),
+        )
+        .withColumn(
+            "purview_copilot_usage_jailbreak_detected",
+            F.coalesce(
+                F.expr("exists(_messages, x -> x.JailbreakDetected)"),
+                F.lit(False),
+            ),
+        )
+        .withColumn(
+            "purview_copilot_usage_plugin_count",
+            F.when(F.col("_plugins").isNull(), 0).otherwise(F.size(F.col("_plugins"))),
+        )
+        .withColumn(
+            "purview_copilot_usage_uses_bing_web_search",
+            F.coalesce(
+                F.expr("exists(_plugins, x -> x.Id = 'BingWebSearch')"),
+                F.lit(False),
+            ),
+        )
+        .withColumn(
+            "purview_copilot_usage_accessed_resource_count",
+            F.when(F.col("_resources").isNull(), 0).otherwise(F.size(F.col("_resources"))),
+        )
+        .drop("_messages_json", "_plugins_json", "_resources_json", "_messages", "_plugins", "_resources")
+    )
+
+    base = base.dropDuplicates(["purview_copilot_usage_record_id"])
+
+    base = base.withColumn(
+        "purview_copilot_usage_has_prompt",
+        F.col("purview_copilot_usage_prompt_count") > 0,
+    ).withColumn(
+        "purview_copilot_usage_interaction_type",
+        purview_copilot_interaction_type(
+            F.col("purview_copilot_usage_app_identity"),
+            F.col("purview_copilot_usage_agent_name"),
+        ),
+    ).withColumn(
+        "purview_copilot_usage_has_model_info",
+        F.col("purview_copilot_usage_model_name").isNotNull()
+        | F.col("purview_copilot_usage_model_provider_name").isNotNull(),
+    ).withColumn(
+        "purview_copilot_usage_has_resource_access",
+        F.col("purview_copilot_usage_accessed_resource_count") > 0,
+    ).withColumn(
+        "purview_copilot_usage_month_no",
+        (
+            F.year("purview_copilot_usage_date") * F.lit(100)
+            + F.month("purview_copilot_usage_date")
+        ).cast("int"),
+    )
+
+    okta_slim = okta.select(
+        "OktaUserId",
+        "OktaUserEmail",
+        "OktaUserFullEmail",
+        "OktaUserEmployeeNumber",
+        "OktaUserFullName",
+        "OktaUserRegion",
+        "OktaUserCountry",
+    )
+    joined = join_okta_on_user_email(base, okta_slim, "purview_copilot_usage_email")
+    joined = joined.withColumn(
+        "purview_copilot_usage_key_email",
+        F.when(
+            F.col("OktaUserEmail").isNotNull(),
+            F.concat(
+                F.col("purview_copilot_usage_month_no").cast("string"),
+                F.lit("/"),
+                F.col("OktaUserEmail"),
+            ),
+        ),
+    ).withColumn(
+        "purview_copilot_usage_key_full_email",
+        F.when(
+            F.col("OktaUserFullEmail").isNotNull(),
+            F.concat(
+                F.col("purview_copilot_usage_month_no").cast("string"),
+                F.lit("/"),
+                F.col("OktaUserFullEmail"),
+            ),
+        ),
+    )
+
+    hc_slim = hc.select(
+        F.col("HCKeyEmail"),
+        F.col("HCBusinessUnit"),
+        F.col("HCBusinessUnitCode"),
+        F.col("HCDivision"),
+        F.col("HCJobTitle"),
+        F.col("HCOffice"),
+        F.col("HCTalentSegment"),
+        F.col("Month_No").alias("HCMonthNo"),
+        F.col("OktaUserCountry").alias("HCOktaUserCountry"),
+        F.col("HCDivisionINC"),
+    )
+    joined = join_hc_on_email_keys(
+        joined,
+        hc_slim,
+        "purview_copilot_usage_key_email",
+        "purview_copilot_usage_key_full_email",
+    )
+
+    return joined.select(
+        "purview_copilot_usage_record_id",
+        "purview_copilot_usage_date",
+        "purview_copilot_usage_record_type",
+        "purview_copilot_usage_operation",
+        "purview_copilot_usage_email",
+        "purview_copilot_usage_associated_admin_units",
+        "purview_copilot_usage_associated_admin_units_names",
+        "purview_copilot_usage_app_identity",
+        "purview_copilot_usage_application_name",
+        "purview_copilot_usage_app_host",
+        "purview_copilot_usage_agent_name",
+        "purview_copilot_usage_target_agent_name",
+        "purview_copilot_usage_license_type",
+        "purview_copilot_usage_conversation_id",
+        "purview_copilot_usage_thread_id",
+        "purview_copilot_usage_model_name",
+        "purview_copilot_usage_model_provider_name",
+        "purview_copilot_usage_message_count",
+        "purview_copilot_usage_prompt_count",
+        "purview_copilot_usage_has_prompt",
+        "purview_copilot_usage_jailbreak_detected",
+        "purview_copilot_usage_plugin_count",
+        "purview_copilot_usage_uses_bing_web_search",
+        "purview_copilot_usage_accessed_resource_count",
+        "purview_copilot_usage_interaction_type",
+        "purview_copilot_usage_has_model_info",
+        "purview_copilot_usage_has_resource_access",
+        "purview_copilot_usage_copilot_log_version",
+        "purview_copilot_usage_month_no",
+        "purview_copilot_usage_file_name",
+        "purview_copilot_usage_ingestion_date",
+        F.col("OktaUserCountry").alias("okta_user_country"),
+        F.col("OktaUserEmail").alias("okta_user_email"),
+        F.col("OktaUserEmployeeNumber").alias("okta_user_employee_number"),
+        F.col("OktaUserFullEmail").alias("okta_user_full_email"),
+        F.col("OktaUserFullName").alias("okta_user_full_name"),
+        F.col("OktaUserId").alias("okta_user_id"),
+        F.col("OktaUserRegion").alias("okta_user_region"),
+        "purview_copilot_usage_key_email",
+        "purview_copilot_usage_key_full_email",
+        F.col("HCBusinessUnit").alias("hc_business_unit"),
+        F.col("HCBusinessUnitCode").alias("hc_business_unit_code"),
+        F.col("HCDivision").alias("hc_division"),
+        F.col("HCJobTitle").alias("hc_job_title"),
+        F.col("HCOffice").alias("hc_office"),
+        F.col("HCTalentSegment").alias("hc_talent_segment"),
+        F.col("HCMonthNo").alias("hc_month_no"),
+        F.col("HCOktaUserCountry").alias("hc_okta_user_country"),
+        F.col("HCDivisionINC").alias("hc_division_inc"),
     )
 
 

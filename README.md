@@ -7,7 +7,7 @@ Bronze → Silver → Gold for HC, Okta, and cursor_usage.
 | Folder | Notebooks |
 |--------|-----------|
 | `Notebook/Bronze/` | (ingest in Fabric — no pipeline notebooks) |
-| `Notebook/Silver/` | `NB_HCHistorical_Bronze_To_Silver`, `NB_OktaUserforAI_Bronze_To_Silver`, `NB_CursorUsage_Bronze_To_Silver` |
+| `Notebook/Silver/` | `NB_HCHistorical_Bronze_To_Silver`, `NB_OktaUserforAI_Bronze_To_Silver`, `NB_CursorUsage_Bronze_To_Silver`, `NB_Purview_Copilot_BronzeToSilver` |
 | `Notebook/Gold/` | `NB_CursorUsage_Gold`, `NB_CursorOnboard_Gold` |
 | `Common/` | Bootstrap, config, I/O, transforms — see **`Common/README.md`** |
 | `Scripts/` | `check_env.py`, `verify_local_spark.py`, `reinstall_local_spark.ps1`, `sync_notebooks_to_entry.py` |
@@ -64,7 +64,7 @@ os.environ.setdefault("MEDALLION_SCAN_RETRIES", "6")
 ```
 
 **Order:**  
-`Notebook/Silver/NB_HCHistorical_Bronze_To_Silver` → `Notebook/Silver/NB_OktaUserforAI_Bronze_To_Silver` → `Notebook/Silver/NB_CursorUsage_Bronze_To_Silver` → `Notebook/Gold/NB_CursorUsage_Gold` → `Notebook/Gold/NB_CursorOnboard_Gold`.
+`Notebook/Silver/NB_HCHistorical_Bronze_To_Silver` → `Notebook/Silver/NB_OktaUserforAI_Bronze_To_Silver` → `Notebook/Silver/NB_CursorUsage_Bronze_To_Silver` and/or `Notebook/Silver/NB_Purview_Copilot_BronzeToSilver` → `Notebook/Gold/NB_CursorUsage_Gold` → `Notebook/Gold/NB_CursorOnboard_Gold`.
 
 Local reads use **deltalake scan** and `az login` by default. Table paths and lakehouse IDs are in `Common/config.py`. Optional overrides: `Common/local_settings.py` (see `local_settings.example.py`).
 
