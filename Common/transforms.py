@@ -518,6 +518,67 @@ def build_purview_copilot_usage_silver(
     )
 
 
+def purview_copilot_use_case_code(interaction_type: Column) -> Column:
+    """Map silver interaction type to fixed Active use-case codes."""
+    return (
+        F.when(interaction_type == "Web Chat", F.lit("UC-9007-COP-001"))
+        .when(interaction_type == "Microsoft 365 App", F.lit("UC-9007-COP-002"))
+        .when(interaction_type == "Built-in Agent", F.lit("UC-9007-COP-003"))
+        .when(interaction_type == "Copilot Studio Agent", F.lit("UC-9007-COP-004"))
+        .when(interaction_type == "Specialized Agent", F.lit("UC-9007-COP-005"))
+        .when(interaction_type == "Power BI / Fabric", F.lit("UC-9007-COP-006"))
+        .otherwise(F.lit("UC-9007-COP-007"))
+    )
+
+
+def purview_active_copilot_aggregate(silver: DataFrame) -> DataFrame:
+    """Premium license; group by user, date, interaction type; Request = sum(prompts); Request > 1."""
+    premium = silver.filter(F.col("purview_copilot_usage_license_type") == F.lit("Premium"))
+    grouped = (
+        premium.groupBy(
+            "purview_copilot_usage_date",
+            "okta_user_id",
+            "purview_copilot_usage_interaction_type",
+        )
+        .agg(
+            F.first("purview_copilot_usage_month_no", ignorenulls=True)
+            .cast("int")
+            .alias("Month_No"),
+            F.sum("purview_copilot_usage_prompt_count").cast("int").alias("Request"),
+            F.first("okta_user_full_name", ignorenulls=True).alias("okta_user_full_name"),
+            F.first("okta_user_employee_number", ignorenulls=True).alias(
+                "okta_user_employee_number"
+            ),
+            F.first("okta_user_email", ignorenulls=True).alias("okta_user_email"),
+            F.first("okta_user_full_email", ignorenulls=True).alias("okta_user_full_email"),
+            F.first("okta_user_region", ignorenulls=True).alias("okta_user_region"),
+            F.first("okta_user_country", ignorenulls=True).alias("okta_user_country"),
+            F.first("hc_business_unit", ignorenulls=True).alias("hc_business_unit"),
+            F.first("hc_job_title", ignorenulls=True).alias("hc_job_title"),
+            F.first("hc_okta_user_country", ignorenulls=True).alias("hc_okta_user_country"),
+            F.first("hc_office", ignorenulls=True).alias("hc_office"),
+            F.first("hc_talent_segment", ignorenulls=True).alias("hc_talent_segment"),
+            F.first("hc_division", ignorenulls=True).alias("hc_division"),
+            F.first("hc_business_unit_code", ignorenulls=True).alias("hc_business_unit_code"),
+        )
+        .filter(F.col("Request") > 1)
+    )
+    return grouped
+
+
+def purview_active_copilot_merge_key() -> Column:
+    """Merge grain: one row per (activity date, Okta user, interaction type)."""
+    return F.sha2(
+        F.concat_ws(
+            "|",
+            F.coalesce(F.col("purview_copilot_usage_date").cast("string"), F.lit("")),
+            F.coalesce(F.col("okta_user_id"), F.lit("")),
+            F.coalesce(F.col("purview_copilot_usage_interaction_type"), F.lit("")),
+        ),
+        256,
+    )
+
+
 def cursor_usage_record_key() -> Column:
     """SHA2 row key for silver ``cursor_usage`` (event-level merge)."""
     parts = [
