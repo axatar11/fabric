@@ -356,6 +356,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "cursor_active_daily_merge_key": transforms.cursor_active_daily_merge_key,
             "cursor_onboard_daily_dedupe": transforms.cursor_onboard_daily_dedupe,
             "cursor_onboard_merge_key": transforms.cursor_onboard_merge_key,
+            "build_purview_copilot_usage_silver": transforms.build_purview_copilot_usage_silver,
             "show_sample": show_sample,
             "reload_io_helpers": _bind_reload_io_helpers(notebook_globals),
             "save_table_cache": io.save_table_cache,
