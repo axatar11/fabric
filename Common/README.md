@@ -66,6 +66,8 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`join_okta_for_cursor_usage` / `join_hc_for_cursor_usage`** | Equi-join helpers (optional; cursor_usage silver notebook inlines joins). |
 | **`cursor_usage_record_key()`** | SHA2 merge key for **silver** cursor_usage rows. |
 | **`build_purview_copilot_usage_silver(...)`** | Bronze **purview_copilot_usage** → silver (audit JSON, Okta inner join, HC left join). |
+| **`purview_active_copilot_aggregate` / `purview_active_copilot_merge_key`** | Gold **fact_active_copilot** grain (Premium, sum prompts, Request > 1). |
+| **`purview_copilot_use_case_code`** | Interaction type → `UC-9007-COP-*` use case code. |
 | **`cursor_active_daily_aggregate(silver)`** | Gold active: group by date + Okta user, `COUNT(*)` Request. |
 | **`cursor_active_daily_merge_key()`** | SHA2 key per (date, Okta user) for gold active. |
 | **`cursor_onboard_daily_dedupe(silver)`** | One row per user/day (latest ingestion). |

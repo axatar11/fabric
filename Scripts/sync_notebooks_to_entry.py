@@ -55,6 +55,7 @@ def main() -> None:
     for name in (
         "Notebook/Gold/NB_CursorUsage_Gold.ipynb",
         "Notebook/Gold/NB_CursorOnboard_Gold.ipynb",
+        "Notebook/Gold/NB_Purview_Copilot_SilverToGold.ipynb",
     ):
         nb = load_nb(ROOT / name)
         set_bootstrap_cell(nb)
