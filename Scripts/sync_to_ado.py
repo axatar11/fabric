@@ -118,17 +118,19 @@ def sync_tree(rel_dir: str, source: Path, target: Path, *, dry_run: bool) -> int
 def sync_files(source: Path, target: Path, *, dry_run: bool) -> int:
     n = 0
     for rel in SYNC_FILES:
-        src = source / rel
+        rel_path = Path(rel)
+        display = rel_path.as_posix()
+        src = source / rel_path
         if not src.is_file():
-            print(f"skip  (missing) {rel.as_posix()}")
+            print(f"skip  (missing) {display}")
             continue
-        dst = target / rel
+        dst = target / rel_path
         if dry_run:
             print(f"COPY  {src} -> {dst}")
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
-            print(f"copy  {rel.as_posix()}")
+            print(f"copy  {display}")
         n += 1
     return n
 
