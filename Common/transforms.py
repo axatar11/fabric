@@ -532,10 +532,9 @@ def purview_copilot_use_case_code(interaction_type: Column) -> Column:
 
 
 def purview_active_copilot_aggregate(silver: DataFrame) -> DataFrame:
-    """Premium license; group by user, date, interaction type; Request = sum(prompts); Request > 1."""
-    premium = silver.filter(F.col("purview_copilot_usage_license_type") == F.lit("Premium"))
+    """Group by user, date, interaction type; Request = sum(prompts); keep groups with Request > 1."""
     grouped = (
-        premium.groupBy(
+        silver.groupBy(
             "purview_copilot_usage_date",
             "okta_user_id",
             "purview_copilot_usage_interaction_type",
