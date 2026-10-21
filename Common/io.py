@@ -501,9 +501,10 @@ def _write_df_via_local_iterator_chunks(df: DataFrame, path: Path) -> None:
         if not buffer:
             return
         pdf = pd.DataFrame(buffer, columns=columns)
-        _write_pandas_to_parquet_dir(
-            pdf, path / f"part-{part_idx:05d}.parquet", spark_schema=spark_schema
-        )
+        out_file = path / f"part-{part_idx:05d}.parquet"
+        _write_parquet_with_spark_schema(pdf, spark_schema, out_file)
+        if part_idx == 0:
+            _write_local_cache_schema(path, spark_schema)
         buffer = []
         part_idx += 1
 
