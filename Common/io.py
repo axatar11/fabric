@@ -483,6 +483,40 @@ def _local_parquet_use_spark_writer() -> bool:
     return flag.lower() not in ("0", "false", "no")
 
 
+def _write_df_via_local_iterator_chunks(df: DataFrame, path: Path) -> None:
+    """Driver-side chunked materialization (avoids one large collectToPython on Windows)."""
+    import pandas as pd
+
+    chunk_rows = max(5_000, int(os.environ.get("MEDALLION_STAGING_COLLECT_ROWS", "25000")))
+    spark_schema = df.schema
+    columns = [field.name for field in spark_schema.fields]
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(parents=True, exist_ok=True)
+    buffer: list[dict] = []
+    part_idx = 0
+
+    def flush() -> None:
+        nonlocal buffer, part_idx
+        if not buffer:
+            return
+        pdf = pd.DataFrame(buffer, columns=columns)
+        out_file = path / f"part-{part_idx:05d}.parquet"
+        _write_parquet_with_spark_schema(pdf, spark_schema, out_file)
+        if part_idx == 0:
+            _write_local_cache_schema(path, spark_schema)
+        buffer = []
+        part_idx += 1
+
+    for row in df.toLocalIterator():
+        buffer.append(row.asDict())
+        if len(buffer) >= chunk_rows:
+            flush()
+    flush()
+    if not any(path.glob("*.parquet")):
+        raise RuntimeError("localIterator produced no parquet output")
+
+
 def _write_spark_parquet_dir(df: DataFrame, path: Path) -> None:
     """JVM parquet to file:// (no Python worker / Arrow collect — safe for large join plans)."""
     if path.exists():
@@ -502,26 +536,46 @@ def _write_df_to_local_parquet(
         parts = max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1")))
         df = _sanitize_df_for_export(df.coalesce(parts))
     if _use_path_reads() and _local_parquet_use_spark_writer():
-        try:
-            _write_spark_parquet_dir(df, path)
-            return
-        except Exception as exc:
-            _read_debug(
-                f"local Spark parquet write failed ({exc!s}); trying localCheckpoint"
-            )
+        part_candidates: list[int] = []
+        if staging:
+            base = _staging_write_partitions()
+            part_candidates = [base, max(base, 8), 16, 32]
+        else:
+            part_candidates = [max(1, int(os.environ.get("MEDALLION_MERGE_COALESCE", "1"))), 8]
+        seen_parts: set[int] = set()
+        for parts in part_candidates:
+            if parts in seen_parts:
+                continue
+            seen_parts.add(parts)
+            try:
+                staged = _sanitize_df_for_export(df)
+                staged = staged.repartition(parts) if parts > 1 else staged.coalesce(1)
+                _write_spark_parquet_dir(staged, path)
+                return
+            except Exception as exc:
+                _read_debug(
+                    f"local Spark parquet write failed ({parts} parts, {exc!s}); retrying"
+                )
         if staging:
             try:
                 spark = df.sparkSession
                 df = _materialize_local_checkpoint(spark, df)
-                _write_spark_parquet_dir(df.coalesce(1), path)
+                _write_spark_parquet_dir(
+                    df.repartition(_staging_write_partitions()), path
+                )
                 return
             except Exception as exc2:
                 _read_debug(
                     f"localCheckpoint parquet write failed ({exc2!s}); "
-                    "falling back to PyArrow collect"
+                    "falling back to chunked driver collect"
                 )
     spark = df.sparkSession
     spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "false")
+    try:
+        _write_df_via_local_iterator_chunks(df, path)
+        return
+    except Exception as exc:
+        _read_debug(f"chunked localIterator write failed ({exc!s}); falling back to toPandas")
     pdf = df.toPandas()
     _write_pandas_to_parquet_dir(pdf, path, spark_schema=df.schema)
 
@@ -666,29 +720,44 @@ def merge_staging_path(table_fqn: str) -> Path:
     return Path.home() / ".fabric" / "merge_staging" / safe
 
 
+def _try_scan_table_to_local_cache(spark: SparkSession, table_fqn: str) -> bool:
+    """Stream OneLake scan into ``medallion_cache`` parquet (no ``break_lineage`` Spark collect)."""
+    if not _local_table_cache_enabled() or _local_cache_refresh():
+        return False
+    lake_path = delta_path_for_table(table_fqn)
+    if not lake_path or _resolve_read_backend(lake_path) != "scan":
+        return False
+    cache_path = local_cache_path(table_fqn)
+    if _local_cache_refresh() and cache_path.exists():
+        shutil.rmtree(cache_path, ignore_errors=True)
+    try:
+        _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
+        _read_delta_via_deltalake_scan(spark, lake_path, cache_dir=cache_path)
+        return cache_file_exists(cache_path)
+    except Exception as exc:
+        _read_debug(f"scan-to-cache failed for {table_fqn}: {exc}")
+        return False
+
+
 def read_table_broken_lineage(
     spark: SparkSession, table_fqn: str, label: str
 ) -> DataFrame:
-    """``read_table`` then materialize for joins — skip extra copy when local cache already holds parquet."""
+    """``read_table`` then materialize for joins — prefer local cache parquet over ``break_lineage`` collect."""
     cache_path = local_cache_path(table_fqn)
-    had_cache = (
-        _local_table_cache_enabled()
-        and not _local_cache_refresh()
-        and cache_file_exists(cache_path)
-    )
+    cache_ok = _local_table_cache_enabled() and not _local_cache_refresh()
+
+    if cache_ok and cache_file_exists(cache_path):
+        _read_progress(f"read_table_broken_lineage: cache hit ({label})")
+        return _read_parquet_cache_dir(spark, cache_path, table_fqn)
+
+    if cache_ok and _try_scan_table_to_local_cache(spark, table_fqn):
+        _read_progress(f"read_table_broken_lineage: opened cache after scan ({label})")
+        return _read_parquet_cache_dir(spark, cache_path, table_fqn)
+
     df = read_table(spark, table_fqn)
-    if had_cache:
+    if cache_ok and cache_file_exists(cache_path):
         _read_progress(
-            f"read_table_broken_lineage: cache hit, skip break_lineage ({label})"
-        )
-        return df
-    if (
-        _local_table_cache_enabled()
-        and not _local_cache_refresh()
-        and cache_file_exists(cache_path)
-    ):
-        _read_progress(
-            f"read_table_broken_lineage: re-open cache after OneLake scan ({label})"
+            f"read_table_broken_lineage: re-open cache after read_table ({label})"
         )
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
     return break_lineage_local(spark, df, label)
