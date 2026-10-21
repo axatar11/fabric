@@ -681,6 +681,25 @@ def _merge_predicate(merge_key: str) -> str:
     return f"target.{key} = source.{key}"
 
 
+def _merge_key_column_name(merge_key: str) -> str:
+    return merge_key.strip("`")
+
+
+def _dedupe_pandas_merge_source(source, merge_key: str):
+    """Delta MERGE requires at most one source row per merge key."""
+    key = _merge_key_column_name(merge_key)
+    if key not in getattr(source, "columns", ()):
+        return source
+    before = len(source)
+    out = source.drop_duplicates(subset=[key], keep="last")
+    dropped = before - len(out)
+    if dropped:
+        _read_progress(
+            f"merge_incremental: dropped {dropped} duplicate {key} row(s) in chunk"
+        )
+    return out
+
+
 def _merge_chunk_rows() -> int:
     return max(5_000, int(os.environ.get("MEDALLION_MERGE_CHUNK_ROWS", "50000")))
 
@@ -937,6 +956,10 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
         chunk_no = 0
         for source in _parquet_staging_batches(staging):
             chunk_no += 1
+            source = _dedupe_pandas_merge_source(source, merge_key)
+            if len(source) == 0:
+                _read_progress(f"merge_incremental: chunk {chunk_no} empty after dedupe — skip")
+                continue
             _read_progress(f"merge_incremental: chunk {chunk_no} ({len(source)} rows)...")
             if not table_exists:
                 write_deltalake(

@@ -580,12 +580,26 @@ def purview_active_copilot_merge_key() -> Column:
 
 def cursor_usage_record_key() -> Column:
     """SHA2 row key for silver ``cursor_usage`` (event-level merge)."""
+    key_cols = (
+        "CursorUsageUser",
+        "CursorUsageDate",
+        "CursorUsageKind",
+        "CursorUsageModel",
+        "CursorUsageMaxMode",
+        "CursorUsageInputWithCacheWrite",
+        "CursorUsageInputWithoutCacheWrite",
+        "CursorUsageCacheRead",
+        "CursorUsageOutputTokens",
+        "CursorUsageTotalTokens",
+        "CursorUsageCost",
+        "CursorUsageFileName",
+        "CursorUsageIngestionDate",
+        "CursorUsageServiceAccountID",
+        "CursorUsageCloudAgentID",
+        "CursorUsageAutomationID",
+        "OktaUserId",
+    )
     parts = [
-        F.coalesce(F.col("CursorUsageUser"), F.lit("")),
-        F.coalesce(F.col("CursorUsageDate").cast("string"), F.lit("")),
-        F.coalesce(F.col("CursorUsageKind"), F.lit("")),
-        F.coalesce(F.col("CursorUsageModel"), F.lit("")),
-        F.coalesce(F.col("CursorUsageTotalTokens").cast("string"), F.lit("")),
-        F.coalesce(F.col("CursorUsageCost").cast("string"), F.lit("")),
+        F.coalesce(F.col(c).cast("string"), F.lit("")) for c in key_cols
     ]
     return F.sha2(F.concat_ws("|", *parts), 256)
