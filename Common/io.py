@@ -949,7 +949,8 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
                 table_exists = True
                 dt = DeltaTable(path, storage_options=opts)
                 continue
-            assert dt is not None
+            if dt is None:
+                dt = DeltaTable(path, storage_options=opts)
             (
                 dt.merge(
                     source,
