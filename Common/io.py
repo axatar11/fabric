@@ -70,11 +70,11 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ONBOARD", "Gold/fact_cursor_onboard"),
     )
     copilot_active_fqn = getattr(
-        config, "TABLE_FACT_ACTIVE_COPILOT", _default_gold_table_fqn("fact_active_copilot")
+        config, "TABLE_FACT_COPILOT_ACTIVE", _default_gold_table_fqn("fact_copilot_active")
     )
     mapping[copilot_active_fqn] = onelake_table_path(
         med,
-        os.environ.get("ONELAKE_GOLD_FACT_ACTIVE_COPILOT", "Gold/fact_active_copilot"),
+        os.environ.get("ONELAKE_GOLD_FACT_COPILOT_ACTIVE", "Gold/fact_copilot_active"),
     )
     try:
         from Common import local_settings as ls  # type: ignore

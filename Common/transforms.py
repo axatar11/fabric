@@ -532,7 +532,7 @@ def purview_copilot_use_case_code(interaction_type: Column) -> Column:
 
 
 def purview_active_copilot_aggregate(silver: DataFrame) -> DataFrame:
-    """Group by user, date, interaction type; Request = sum(prompts); keep groups with Request > 1."""
+    """Group by user, date, interaction type; Request = sum(prompts); keep groups with Request >= 1."""
     grouped = (
         silver.groupBy(
             "purview_copilot_usage_date",
@@ -560,7 +560,7 @@ def purview_active_copilot_aggregate(silver: DataFrame) -> DataFrame:
             F.first("hc_division", ignorenulls=True).alias("hc_division"),
             F.first("hc_business_unit_code", ignorenulls=True).alias("hc_business_unit_code"),
         )
-        .filter(F.col("Request") > 1)
+        .filter(F.col("Request") >= 1)
     )
     return grouped
 
