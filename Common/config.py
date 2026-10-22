@@ -89,7 +89,7 @@ PURVIEW_COPILOT_BRONZE_SCAN_COLUMNS = (
     "RecordId",
     "CreationDate",
     "FileName",
-    "IngestionDate",
+    "ExecutionDate",
     "UserId",
     "RecordType",
     "Operation",

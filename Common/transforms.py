@@ -294,7 +294,7 @@ def build_purview_copilot_usage_silver(
     creation_date = creation.cast("date")
     file_name = _bronze_column_or_null(bronze, "FileName", "file_name", "string")
     ingestion = _bronze_column_or_null(
-        bronze, "IngestionDate", "ingestion_date", "timestamp"
+        bronze, "ExecutionDate", "execution_date", "IngestionDate", "ingestion_date", "timestamp"
     ).cast("timestamp")
     user_id = _bronze_column(bronze, "UserId", "user_id")
 
