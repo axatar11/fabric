@@ -389,8 +389,9 @@ def _read_delta_via_deltalake_scan(
     last_error: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            refresh_abfs_token_env()
-            opts = fabric_storage_options()
+            force_token = attempt > 1
+            refresh_abfs_token_env(force=force_token)
+            opts = fabric_storage_options(force=force_token)
             _read_debug(f"read_table: deltalake scan {path} (attempt {attempt}/{max_retries})")
             dt = DeltaTable(path, storage_options=opts)
             spark_schema = _deltalake_schema_to_spark(dt)

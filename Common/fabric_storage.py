@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,19 @@ _ONELAKE_CLI_JAR = Path(__file__).resolve().parent / "jars" / "onelake-cli-token
 _HADOOP_CONF_TOKEN = "org.fabric.onelake.access.token"
 _HADOOP_CONF_TOKEN_FILE = "org.fabric.onelake.token.file"
 _HADOOP_CONF_TOKEN_EXPIRY = "org.fabric.onelake.token.expiry"
+_TOKEN_CACHE: tuple[str, int] | None = None
+
+
+def _azure_cli_process_timeout_seconds() -> int:
+    return max(10, int(os.environ.get("MEDALLION_AZURE_CLI_TIMEOUT", "120")))
+
+
+def _token_refresh_skew_seconds() -> int:
+    return max(60, int(os.environ.get("MEDALLION_ABFS_TOKEN_SKEW_SECONDS", "300")))
+
+
+def _cached_token_valid(expires_on: int) -> bool:
+    return time.time() < (expires_on - _token_refresh_skew_seconds())
 
 
 def onelake_cli_token_jar() -> str:
@@ -34,8 +48,14 @@ def ensure_azure_cli_on_path() -> None:
             os.environ["PATH"] = _AZURE_CLI_WIN + os.pathsep + path
 
 
-def azure_cli_access_token() -> tuple[str, int]:
+def azure_cli_access_token(*, force: bool = False) -> tuple[str, int]:
     """Return ``(access_token, expires_on_unix)`` from ``AzureCliCredential``."""
+    global _TOKEN_CACHE
+    if not force and _TOKEN_CACHE is not None:
+        cached_token, cached_expiry = _TOKEN_CACHE
+        if _cached_token_valid(cached_expiry):
+            return cached_token, cached_expiry
+
     from azure.identity import AzureCliCredential
 
     ensure_azure_cli_on_path()
@@ -43,9 +63,12 @@ def azure_cli_access_token() -> tuple[str, int]:
         raise RuntimeError(
             "Azure CLI not found on PATH. Install Azure CLI and run: az login"
         )
-    credential = AzureCliCredential()
+    timeout = _azure_cli_process_timeout_seconds()
+    credential = AzureCliCredential(process_timeout=timeout)
     token = credential.get_token("https://storage.azure.com/.default")
-    return token.token, int(token.expires_on)
+    access_token, expires_on = token.token, int(token.expires_on)
+    _TOKEN_CACHE = (access_token, expires_on)
+    return access_token, expires_on
 
 
 def abfs_token_cache_path() -> Path:
@@ -56,9 +79,9 @@ def abfs_token_cache_path() -> Path:
     return Path.home() / ".fabric" / "onelake_abfs_token"
 
 
-def refresh_abfs_token_env() -> tuple[str, int, Path]:
+def refresh_abfs_token_env(*, force: bool = False) -> tuple[str, int, Path]:
     """Azure CLI token for JVM (file + env); PySpark JVM does not see os.environ after start."""
-    access_token, expires_on = azure_cli_access_token()
+    access_token, expires_on = azure_cli_access_token(force=force)
     os.environ["ONELAKE_ABFS_ACCESS_TOKEN"] = access_token
     os.environ["ONELAKE_ABFS_TOKEN_EXPIRY"] = str(expires_on)
     cache = abfs_token_cache_path()
@@ -87,9 +110,9 @@ def apply_azure_cli_abfs_conf(spark) -> None:
         spark.conf.set(f"spark.hadoop.{key}", val)
 
 
-def fabric_storage_options() -> dict[str, Any]:
-    """Fresh Azure CLI token for deltalake / OneLake (call again before each table read)."""
-    access_token, expires_on = azure_cli_access_token()
+def fabric_storage_options(*, force: bool = False) -> dict[str, Any]:
+    """Azure CLI token for deltalake / OneLake (cached until near expiry)."""
+    access_token, expires_on = azure_cli_access_token(force=force)
     return {
         "bearer_token": access_token,
         "use_fabric_endpoint": "true",

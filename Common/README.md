@@ -28,7 +28,7 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | Function | What it does |
 |----------|----------------|
 | **`ensure_azure_cli_on_path()`** | Prepends Windows Azure CLI to `PATH`. |
-| **`azure_cli_access_token()`** | Token from `az login` for storage scope. |
+| **`azure_cli_access_token()`** | Token from `az login` for storage scope (cached; `MEDALLION_AZURE_CLI_TIMEOUT` default 120s). |
 | **`refresh_abfs_token_env()`** | Writes token to env + `~/.fabric/onelake_abfs_token` for JVM. |
 | **`apply_azure_cli_abfs_conf(spark)`** | Spark Hadoop config for `abfss://` reads/writes with CLI token. |
 | **`fabric_storage_options()`** | Dict for **deltalake** Python (`bearer_token`, Fabric endpoint). |
