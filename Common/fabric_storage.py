@@ -113,8 +113,10 @@ def apply_azure_cli_abfs_conf(spark) -> None:
 def fabric_storage_options(*, force: bool = False) -> dict[str, Any]:
     """Azure CLI token for deltalake / OneLake (cached until near expiry)."""
     access_token, expires_on = azure_cli_access_token(force=force)
+    max_retries = os.environ.get("MEDALLION_OBJECT_STORE_MAX_RETRIES", "3")
     return {
         "bearer_token": access_token,
         "use_fabric_endpoint": "true",
         "token_expires_on": str(expires_on),
+        "max_retries": max_retries,
     }
