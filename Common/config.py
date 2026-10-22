@@ -83,6 +83,19 @@ ONELAKE_PURVIEW_COPILOT_BRONZE_PATH = (
     f"abfss://{WORKSPACEID}@{ONELAKE_HOST}/"
     f"{LAKEHOUSE_AI_MEDALLION_ID}/Tables/Bronze/purview_copilot_usage"
 )
+# Column projection for local deltalake scan (smaller OneLake reads than SELECT *).
+PURVIEW_COPILOT_BRONZE_SCAN_COLUMNS = (
+    "AuditData",
+    "RecordId",
+    "CreationDate",
+    "FileName",
+    "IngestionDate",
+    "UserId",
+    "RecordType",
+    "Operation",
+    "AssociatedAdminUnits",
+    "AssociatedAdminUnitsNames",
+)
 
 CONFIG_NAMES = [
     "WORKSPACEID",
@@ -124,5 +137,6 @@ CONFIG_NAMES = [
     "CURSOR_BRONZE_FILENAME",
     "ONELAKE_HOST",
     "ONELAKE_CURSOR_BRONZE_PATH",
+    "PURVIEW_COPILOT_BRONZE_SCAN_COLUMNS",
     "ONELAKE_PURVIEW_COPILOT_BRONZE_PATH",
 ]

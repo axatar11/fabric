@@ -248,6 +248,38 @@ def join_hc_on_email_keys(
     )
 
 
+def _calendar_month_end_exclusive(yyyy_mm: str) -> str:
+    year_s, month_s = yyyy_mm.split("-", 1)
+    year, month = int(year_s), int(month_s)
+    if month == 12:
+        return f"{year + 1}-01-01"
+    return f"{year}-{month + 1:02d}-01"
+
+
+def purview_copilot_bronze_scan_predicate(
+    *,
+    creation_month: str | None = None,
+    filenames: list[str] | None = None,
+    min_creation_date: str | None = None,
+    creation_col: str = "CreationDate",
+    file_col: str = "FileName",
+) -> str | None:
+    """Optional DataFusion SQL for deltalake ``scan(predicate=...)`` (smaller OneLake read)."""
+    clauses: list[str] = []
+    if creation_month:
+        start = f"{creation_month}-01"
+        end = _calendar_month_end_exclusive(creation_month)
+        clauses.append(f"{creation_col} >= '{start}' AND {creation_col} < '{end}'")
+    elif min_creation_date:
+        clauses.append(f"{creation_col} >= '{min_creation_date}'")
+    if filenames:
+        quoted = ", ".join("'" + name.replace("'", "''") + "'" for name in filenames)
+        clauses.append(f"{file_col} IN ({quoted})")
+    if not clauses:
+        return None
+    return " AND ".join(f"({part})" for part in clauses)
+
+
 def build_purview_copilot_usage_silver(
     bronze: DataFrame,
     okta: DataFrame,
