@@ -209,6 +209,9 @@ def _format_onelake_scan_failure_msg(
             "  • Stop long retry loops: MEDALLION_SCAN_NETWORK_RETRIES=1 MEDALLION_OBJECT_STORE_MAX_RETRIES=1",
             "  • reload_io_helpers(globals()) after changing env vars.",
             "  • Optional: MEDALLION_SCAN_FALLBACK_PYSPARK=1 (PySpark ABFS; may also timeout locally).",
+            "  • If you pulled full bronze before: use the unscoped folder under "
+            f"{Path.home() / '.fabric' / 'medallion_cache'} (no __scope_ suffix); "
+            "MEDALLION_PREFER_UNSCOPED_CACHE=1 (default) reads that instead of scoped blob GETs.",
         ]
     )
     return "\n".join(lines)
@@ -621,6 +624,36 @@ def _scan_scope_key(
     return f"cols={cols}|pred={pred}"
 
 
+def _prefer_unscoped_local_cache() -> bool:
+    """When True, reuse a full-table ``medallion_cache`` folder instead of a scoped OneLake scan."""
+    flag = os.environ.get("MEDALLION_PREFER_UNSCOPED_CACHE")
+    if flag is not None:
+        return flag.lower() in ("1", "true", "yes")
+    return True
+
+
+def _read_unscoped_local_cache_if_available(
+    spark: SparkSession,
+    table_fqn: str,
+    label: str,
+    *,
+    scope_key: str | None,
+) -> DataFrame | None:
+    if not scope_key or not _prefer_unscoped_local_cache():
+        return None
+    if not _local_table_cache_enabled() or _local_cache_refresh():
+        return None
+    unscoped = local_cache_path(table_fqn, None)
+    if not cache_file_exists(unscoped):
+        return None
+    _read_progress(
+        f"read_table_broken_lineage: full local cache hit ({label}) — "
+        "skipping scoped OneLake scan (month/file filters still run in transform). "
+        "Set MEDALLION_PREFER_UNSCOPED_CACHE=0 to force a new scoped download."
+    )
+    return _read_parquet_cache_dir(spark, unscoped, table_fqn)
+
+
 def _read_parquet_cache_dir(
     spark: SparkSession, cache_dir: Path, table_fqn: str
 ) -> DataFrame:
@@ -941,6 +974,12 @@ def read_table_broken_lineage(
         _read_progress(f"read_table_broken_lineage: cache hit ({label})")
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
 
+    unscoped_cached = _read_unscoped_local_cache_if_available(
+        spark, table_fqn, label, scope_key=scope_key
+    )
+    if unscoped_cached is not None:
+        return unscoped_cached
+
     if use_scan_cache:
         if _local_cache_refresh() and cache_path.exists():
             shutil.rmtree(cache_path, ignore_errors=True)
@@ -955,6 +994,14 @@ def read_table_broken_lineage(
                 scan_columns=scan_columns,
             )
         except Exception as exc:
+            unscoped_cached = _read_unscoped_local_cache_if_available(
+                spark, table_fqn, label, scope_key=scope_key
+            )
+            if unscoped_cached is not None:
+                _read_progress(
+                    f"read_table_broken_lineage: scoped scan failed — using full local cache ({label})"
+                )
+                return unscoped_cached
             if _use_partial_scan_cache() and cache_file_exists(cache_path):
                 _read_progress(
                     f"read_table_broken_lineage: partial cache load ({label}) — "
