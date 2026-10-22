@@ -261,10 +261,14 @@ def purview_copilot_bronze_scan_predicate(
     creation_month: str | None = None,
     filenames: list[str] | None = None,
     min_creation_date: str | None = None,
-    creation_col: str = "CreationDate",
+    creation_col: str | None = None,
     file_col: str = "FileName",
 ) -> str | None:
-    """Optional DataFusion SQL for deltalake ``scan(predicate=...)`` (smaller OneLake read)."""
+    """Optional DataFusion SQL for deltalake ``scan(predicate=...)`` on **CreationDate** (+ FileName)."""
+    from Common import config
+
+    if creation_col is None:
+        creation_col = config.PURVIEW_BRONZE_FILTER_DATE_COLUMN
     clauses: list[str] = []
     if creation_month:
         start = f"{creation_month}-01"

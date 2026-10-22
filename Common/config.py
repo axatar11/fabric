@@ -83,6 +83,8 @@ ONELAKE_PURVIEW_COPILOT_BRONZE_PATH = (
     f"abfss://{WORKSPACEID}@{ONELAKE_HOST}/"
     f"{LAKEHOUSE_AI_MEDALLION_ID}/Tables/Bronze/purview_copilot_usage"
 )
+# Month / min-date incremental filters use CreationDate (event time), not ExecutionDate.
+PURVIEW_BRONZE_FILTER_DATE_COLUMN = "CreationDate"
 # Column projection for local deltalake scan (smaller OneLake reads than SELECT *).
 PURVIEW_COPILOT_BRONZE_SCAN_COLUMNS = (
     "AuditData",
@@ -137,6 +139,7 @@ CONFIG_NAMES = [
     "CURSOR_BRONZE_FILENAME",
     "ONELAKE_HOST",
     "ONELAKE_CURSOR_BRONZE_PATH",
+    "PURVIEW_BRONZE_FILTER_DATE_COLUMN",
     "PURVIEW_COPILOT_BRONZE_SCAN_COLUMNS",
     "ONELAKE_PURVIEW_COPILOT_BRONZE_PATH",
 ]
