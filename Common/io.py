@@ -411,8 +411,12 @@ def _read_delta_via_deltalake_scan(
             return df
         except Exception as exc:
             last_error = exc
-            if cache_dir is not None:
+            if cache_dir is not None and not cache_file_exists(cache_dir):
                 shutil.rmtree(cache_dir, ignore_errors=True)
+            elif cache_dir is not None and cache_file_exists(cache_dir):
+                _read_progress(
+                    f"read_table: scan error — keeping partial cache at {cache_dir}"
+                )
             if attempt >= max_retries or not _scan_retriable_error(exc):
                 raise
             wait = min(2**attempt, 15)

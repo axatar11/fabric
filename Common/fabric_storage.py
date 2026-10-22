@@ -123,4 +123,17 @@ def fabric_storage_options(*, force: bool = False) -> dict[str, Any]:
     retry_timeout = os.environ.get("MEDALLION_OBJECT_STORE_RETRY_TIMEOUT")
     if retry_timeout:
         opts["retry_timeout"] = retry_timeout
+    # deltalake/rust reads OneLake via onelake.blob; limit parallel GETs (Windows often fails above ~2).
+    concurrency = os.environ.get(
+        "MEDALLION_OBJECT_STORE_CONCURRENCY",
+        os.environ.get("OBJECT_STORE_CONCURRENCY_LIMIT", "1"),
+    )
+    if concurrency:
+        opts["OBJECT_STORE_CONCURRENCY_LIMIT"] = concurrency
+    if os.environ.get("MEDALLION_DELTALAKE_USE_FABRIC_BLOB", "1").lower() in (
+        "0",
+        "false",
+        "no",
+    ):
+        opts["use_fabric_endpoint"] = "false"
     return opts
