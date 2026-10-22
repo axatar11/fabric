@@ -250,8 +250,15 @@ def _ensure_onelake_read_deps() -> None:
 
 
 def _bind_read_table_broken_lineage(spark):
-    def read_table_broken_lineage(table_fqn: str, label: str):
-        return io.read_table_broken_lineage(spark, table_fqn, label)
+    def read_table_broken_lineage(
+        table_fqn: str,
+        label: str,
+        *,
+        scan_predicate: str | None = None,
+    ):
+        return io.read_table_broken_lineage(
+            spark, table_fqn, label, scan_predicate=scan_predicate
+        )
 
     return read_table_broken_lineage
 
@@ -357,6 +364,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "cursor_onboard_daily_dedupe": transforms.cursor_onboard_daily_dedupe,
             "cursor_onboard_merge_key": transforms.cursor_onboard_merge_key,
             "build_purview_copilot_usage_silver": transforms.build_purview_copilot_usage_silver,
+            "purview_copilot_bronze_scan_predicate": transforms.purview_copilot_bronze_scan_predicate,
             "purview_active_copilot_aggregate": transforms.purview_active_copilot_aggregate,
             "purview_active_copilot_merge_key": transforms.purview_active_copilot_merge_key,
             "purview_copilot_use_case_code": transforms.purview_copilot_use_case_code,
