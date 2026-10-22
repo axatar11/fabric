@@ -377,6 +377,7 @@ def _read_delta_via_deltalake_scan(
     *,
     cache_dir: Path | None = None,
     table_fqn: str | None = None,
+    scan_predicate: str | None = None,
 ) -> DataFrame:
     """Azure CLI + deltalake DataFusion scan (column mapping / deletion vectors) -> Spark."""
     import time
@@ -394,8 +395,14 @@ def _read_delta_via_deltalake_scan(
             _read_debug(f"read_table: deltalake scan {path} (attempt {attempt}/{max_retries})")
             dt = DeltaTable(path, storage_options=opts)
             spark_schema = _deltalake_schema_to_spark(dt)
+            if scan_predicate:
+                _read_progress(f"read_table: deltalake scan predicate {scan_predicate}")
             _read_debug("read_table: deltalake scan() streaming batches...")
-            reader = dt.scan()
+            reader = (
+                dt.scan(predicate=scan_predicate)
+                if scan_predicate
+                else dt.scan()
+            )
             df, row_count = _scan_batches_to_spark(
                 spark, reader, spark_schema, cache_dir=cache_dir
             )
@@ -470,11 +477,16 @@ def cache_file_exists(cache_dir: Path) -> bool:
     return cache_dir.is_dir() and any(cache_dir.glob("*.parquet"))
 
 
-def local_cache_path(table_fqn: str) -> Path:
+def local_cache_path(table_fqn: str, scan_predicate: str | None = None) -> Path:
     override = os.environ.get("MEDALLION_LOCAL_CACHE_DIR")
     root = Path(override) if override else Path.home() / ".fabric" / "medallion_cache"
     safe = table_fqn.replace(".", "__")
-    return root / safe
+    if not scan_predicate:
+        return root / safe
+    import hashlib
+
+    tag = hashlib.sha256(scan_predicate.encode("utf-8")).hexdigest()[:16]
+    return root / f"{safe}__pred_{tag}"
 
 
 def _read_parquet_cache_dir(
@@ -630,15 +642,21 @@ def load_table_cache(spark: SparkSession, table_fqn: str) -> DataFrame:
     return _read_parquet_cache_dir(spark, path, table_fqn)
 
 
-def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
+def read_table(
+    spark: SparkSession,
+    table_fqn: str,
+    *,
+    scan_predicate: str | None = None,
+) -> DataFrame:
     """Local: OneLake read (with optional local parquet cache). Fabric: spark.table."""
     if _use_path_reads():
         import gc
 
         gc.collect()
-        cached = _read_from_local_cache(spark, table_fqn)
-        if cached is not None:
-            return cached
+        if scan_predicate is None:
+            cached = _read_from_local_cache(spark, table_fqn)
+            if cached is not None:
+                return cached
         path = delta_path_for_table(table_fqn)
         if path:
             backend = _resolve_read_backend(path)
@@ -650,15 +668,22 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
             else:
                 cache_dir = None
                 if _local_table_cache_enabled() and not _skip_auto_cache_on_read():
-                    cache_dir = local_cache_path(table_fqn)
+                    cache_dir = local_cache_path(table_fqn, scan_predicate)
                     if _local_cache_refresh() and cache_dir.exists():
                         shutil.rmtree(cache_dir, ignore_errors=True)
                 df = _read_delta_via_deltalake_scan(
-                    spark, path, cache_dir=cache_dir, table_fqn=table_fqn
+                    spark,
+                    path,
+                    cache_dir=cache_dir,
+                    table_fqn=table_fqn,
+                    scan_predicate=scan_predicate,
                 )
-                if cache_dir is None or not cache_file_exists(cache_dir):
-                    if not _skip_auto_cache_on_read():
-                        _write_local_cache(df, table_fqn)
+                if (
+                    scan_predicate is None
+                    and (cache_dir is None or not cache_file_exists(cache_dir))
+                    and not _skip_auto_cache_on_read()
+                ):
+                    _write_local_cache(df, table_fqn)
             return df
     return spark.table(table_fqn)
 
@@ -757,20 +782,29 @@ def merge_staging_path(table_fqn: str) -> Path:
     return Path.home() / ".fabric" / "merge_staging" / safe
 
 
-def _try_scan_table_to_local_cache(spark: SparkSession, table_fqn: str) -> bool:
+def _try_scan_table_to_local_cache(
+    spark: SparkSession,
+    table_fqn: str,
+    *,
+    scan_predicate: str | None = None,
+) -> bool:
     """Stream OneLake scan into ``medallion_cache`` parquet (no ``break_lineage`` Spark collect)."""
     if not _local_table_cache_enabled():
         return False
     lake_path = delta_path_for_table(table_fqn)
     if not lake_path or _resolve_read_backend(lake_path) != "scan":
         return False
-    cache_path = local_cache_path(table_fqn)
+    cache_path = local_cache_path(table_fqn, scan_predicate)
     if _local_cache_refresh() and cache_path.exists():
         shutil.rmtree(cache_path, ignore_errors=True)
     try:
         _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
         _read_delta_via_deltalake_scan(
-            spark, lake_path, cache_dir=cache_path, table_fqn=table_fqn
+            spark,
+            lake_path,
+            cache_dir=cache_path,
+            table_fqn=table_fqn,
+            scan_predicate=scan_predicate,
         )
         return cache_file_exists(cache_path)
     except Exception as exc:
@@ -779,21 +813,27 @@ def _try_scan_table_to_local_cache(spark: SparkSession, table_fqn: str) -> bool:
 
 
 def read_table_broken_lineage(
-    spark: SparkSession, table_fqn: str, label: str
+    spark: SparkSession,
+    table_fqn: str,
+    label: str,
+    *,
+    scan_predicate: str | None = None,
 ) -> DataFrame:
     """``read_table`` then materialize for joins — prefer local cache parquet over ``break_lineage`` collect."""
-    cache_path = local_cache_path(table_fqn)
+    cache_path = local_cache_path(table_fqn, scan_predicate)
     cache_ok = _local_table_cache_enabled() and not _local_cache_refresh()
 
     if cache_ok and cache_file_exists(cache_path):
         _read_progress(f"read_table_broken_lineage: cache hit ({label})")
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
 
-    if cache_ok and _try_scan_table_to_local_cache(spark, table_fqn):
+    if cache_ok and _try_scan_table_to_local_cache(
+        spark, table_fqn, scan_predicate=scan_predicate
+    ):
         _read_progress(f"read_table_broken_lineage: opened cache after scan ({label})")
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
 
-    df = read_table(spark, table_fqn)
+    df = read_table(spark, table_fqn, scan_predicate=scan_predicate)
     if _local_table_cache_enabled() and cache_file_exists(cache_path):
         _read_progress(
             f"read_table_broken_lineage: re-open cache after read_table ({label})"
