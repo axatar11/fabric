@@ -135,24 +135,40 @@ def _skip_auto_cache_on_read() -> bool:
     return os.environ.get("MEDALLION_SKIP_AUTO_CACHE", "").lower() in ("1", "true", "yes")
 
 
-def _scan_retriable_error(exc: BaseException) -> bool:
-    msg = str(exc).lower()
+def _scan_error_message(exc: BaseException) -> str:
+    return str(exc).lower()
+
+
+def _scan_error_is_auth(exc: BaseException) -> bool:
+    msg = _scan_error_message(exc)
+    return any(t in msg for t in ("401", "403", "unauthorized", "forbidden"))
+
+
+def _scan_error_is_transport(exc: BaseException) -> bool:
+    """Stream/connect failures while reading parquet from OneLake blob (not fixable by token refresh)."""
+    msg = _scan_error_message(exc)
     return any(
-        token in msg
-        for token in (
-            "microsoftazure",
-            "http error",
+        t in msg
+        for t in (
             "body error",
-            "connection",
-            "timeout",
-            "timed out",
-            "401",
-            "403",
-            "503",
-            "reset",
+            "request or response body",
+            "response body error",
+            "error sending request",
+            "client error (connect)",
+            "operation timed out",
+            "connection reset",
             "broken pipe",
         )
     )
+
+
+def _scan_retriable_error(exc: BaseException) -> bool:
+    if _scan_error_is_auth(exc):
+        return True
+    if _scan_error_is_transport(exc):
+        return True
+    msg = _scan_error_message(exc)
+    return any(t in msg for t in ("microsoftazure", "503", "timeout", "timed out"))
 
 
 def _batches_to_pandas(batches) -> "pd.DataFrame":
@@ -386,13 +402,21 @@ def _read_delta_via_deltalake_scan(
     from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
     max_retries = max(1, int(os.environ.get("MEDALLION_SCAN_RETRIES", "6")))
+    max_transport = max(1, int(os.environ.get("MEDALLION_SCAN_TRANSPORT_RETRIES", "2")))
+    transport_failures = 0
     last_error: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            force_token = attempt > 1
+            force_token = attempt > 1 and transport_failures == 0
             refresh_abfs_token_env(force=force_token)
             opts = fabric_storage_options(force=force_token)
             _read_debug(f"read_table: deltalake scan {path} (attempt {attempt}/{max_retries})")
+            limit = opts.get("OBJECT_STORE_CONCURRENCY_LIMIT")
+            if limit:
+                _read_progress(
+                    f"read_table: OneLake object-store concurrency limit={limit} "
+                    "(raise MEDALLION_OBJECT_STORE_CONCURRENCY if reads are too slow)"
+                )
             dt = DeltaTable(path, storage_options=opts)
             spark_schema = _deltalake_schema_to_spark(dt)
             _read_debug("read_table: deltalake scan() streaming batches...")
@@ -417,7 +441,30 @@ def _read_delta_via_deltalake_scan(
                 _read_progress(
                     f"read_table: scan error — keeping partial cache at {cache_dir}"
                 )
-            if attempt >= max_retries or not _scan_retriable_error(exc):
+            if not _scan_retriable_error(exc):
+                raise
+            if _scan_error_is_transport(exc):
+                transport_failures += 1
+                if transport_failures >= max_transport:
+                    raise RuntimeError(
+                        "OneLake parquet download failed mid-stream (HTTP body/connect error). "
+                        "This is not an expired token — az login refresh will not fix it.\n"
+                        f"Error: {exc!s}\n"
+                        "What works reliably:\n"
+                        "  1) Use existing local cache: "
+                        f"{Path.home() / '.fabric' / 'medallion_cache'} (cache hit = no OneLake).\n"
+                        "  2) Seed cache from Fabric: run Spark read in Fabric, write parquet, copy to medallion_cache.\n"
+                        "  3) Tomorrow: Azure SDK per-file download or PySpark cache-fill (column mapping).\n"
+                        "Stopgap: MEDALLION_OBJECT_STORE_CONCURRENCY=1, avoid MEDALLION_CACHE_REFRESH=1."
+                    ) from exc
+                wait = min(5 * transport_failures, 20)
+                _read_progress(
+                    f"read_table: OneLake stream interrupted ({transport_failures}/{max_transport}), "
+                    f"retry in {wait}s (not a token issue)..."
+                )
+                time.sleep(wait)
+                continue
+            if attempt >= max_retries:
                 raise
             wait = min(2**attempt, 15)
             _read_debug(
