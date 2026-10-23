@@ -553,6 +553,11 @@ def _local_parquet_use_spark_writer() -> bool:
     return flag.lower() not in ("0", "false", "no")
 
 
+def _staging_prefer_chunked_collect() -> bool:
+    """Driver-side staging (avoids JVM parquet OOM on large local Windows runs)."""
+    return not _local_parquet_use_spark_writer()
+
+
 def _write_df_via_local_iterator_chunks(df: DataFrame, path: Path) -> None:
     """Driver-side chunked materialization (avoids one large collectToPython on Windows)."""
     import pandas as pd
@@ -600,6 +605,14 @@ def _write_df_to_local_parquet(
     df: DataFrame, path: Path, *, staging: bool = False
 ) -> None:
     """Materialize locally for cache or merge staging."""
+    if staging and _use_path_reads() and _staging_prefer_chunked_collect():
+        df = _sanitize_df_for_export(df.coalesce(1))
+        _read_progress(
+            "materialize staging: chunked driver collect "
+            "(MEDALLION_STAGING_SPARK_PARQUET=0)"
+        )
+        _write_df_via_local_iterator_chunks(df, path)
+        return
     if staging:
         df = _df_for_staging_write(df)
     else:
