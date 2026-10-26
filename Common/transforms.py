@@ -212,10 +212,11 @@ def join_okta_on_user_email(
 
 
 def purview_copilot_email_fallback(email_col: Column) -> Column:
-    """Alternate email when local part starts with ``10`` (strip first two characters)."""
+    """Alternate email when local part starts with ``10`` (SQL ``SUBSTRING(email, 3, LEN(email))``)."""
+    # PySpark substring() requires a constant length; 512 covers any email remainder from pos 3.
     return F.when(
         email_col.rlike(r"^10[^@]*@"),
-        F.substring(email_col, 3, F.length(email_col)),
+        F.substring(email_col, 3, 512),
     )
 
 
