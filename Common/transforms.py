@@ -238,25 +238,35 @@ def join_okta_purview_with_fallback(
         "OktaUserRegion",
         "OktaUserCountry",
     ]
-    o1 = okta_slim.select(*[F.col(c).alias(f"_o1_{c}") for c in okta_cols])
-    o2 = okta_slim.select(*[F.col(c).alias(f"_o2_{c}") for c in okta_cols])
-    primary = (user == F.col("_o1_OktaUserEmail")) | (user == F.col("_o1_OktaUserFullEmail"))
-    step1 = base.join(o1, primary, "left")
-    fb_match = (fallback == F.col("_o2_OktaUserEmail")) | (
-        fallback == F.col("_o2_OktaUserFullEmail")
-    )
-    fallback_cond = F.col("_o1_OktaUserId").isNull() & fallback.isNotNull() & fb_match
-    step2 = step1.join(o2, fallback_cond, "left")
-    out = step2
-    for col_name in okta_cols:
+
+    def _coalesce_okta(df, prefixes: list[str]) -> DataFrame:
+        out = df
+        for name in okta_cols:
+            cols = [F.col(f"{p}{name}") for p in prefixes]
+            out = out.withColumn(name, F.coalesce(*cols))
+        drop = [f"{p}{c}" for p in prefixes for c in okta_cols]
+        return out.drop(*[c for c in drop if c in out.columns])
+
+    p1 = okta_slim.select(*[F.col(c).alias(f"_p1_{c}") for c in okta_cols])
+    p2 = okta_slim.select(*[F.col(c).alias(f"_p2_{c}") for c in okta_cols])
+    primary = base.join(p1, user == F.col("_p1_OktaUserEmail"), "left")
+    primary = primary.join(p2, user == F.col("_p2_OktaUserFullEmail"), "left")
+    primary = _coalesce_okta(primary, ["_p1_", "_p2_"])
+
+    f1 = okta_slim.select(*[F.col(c).alias(f"_f1_{c}") for c in okta_cols])
+    f2 = okta_slim.select(*[F.col(c).alias(f"_f2_{c}") for c in okta_cols])
+    with_fb = primary.join(f1, fallback == F.col("_f1_OktaUserEmail"), "left")
+    with_fb = with_fb.join(f2, fallback == F.col("_f2_OktaUserFullEmail"), "left")
+    out = with_fb
+    for name in okta_cols:
         out = out.withColumn(
-            col_name,
-            F.when(F.col("_o1_OktaUserId").isNotNull(), F.col(f"_o1_{col_name}")).otherwise(
-                F.col(f"_o2_{col_name}")
+            name,
+            F.when(F.col("OktaUserId").isNotNull(), F.col(name)).otherwise(
+                F.coalesce(F.col(f"_f1_{name}"), F.col(f"_f2_{name}"))
             ),
         )
-    drop = [f"_o1_{c}" for c in okta_cols] + [f"_o2_{c}" for c in okta_cols]
-    return out.drop(*drop)
+    drop_fb = [f"_f1_{c}" for c in okta_cols] + [f"_f2_{c}" for c in okta_cols]
+    return out.drop(*[c for c in drop_fb if c in out.columns])
 
 
 def join_hc_on_email_keys(
