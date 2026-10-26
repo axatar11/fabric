@@ -512,12 +512,10 @@ def build_purview_copilot_usage_silver(
         "OktaUserRegion",
         "OktaUserCountry",
     )
-    joined = join_okta_purview_with_fallback(
-        base,
-        okta_slim,
-        "purview_copilot_usage_email",
-        "purview_copilot_usage_email_fallback",
-    )
+    # Fast path (pre-spec): equi inner joins on primary email — same as before PR #105.
+    # ``purview_copilot_usage_email_fallback`` is still populated for reporting; Okta fallback
+    # matching (left join + fallback email) stays in ``join_okta_purview_with_fallback`` for later.
+    joined = join_okta_on_user_email(base, okta_slim, "purview_copilot_usage_email")
     joined = joined.withColumn(
         "purview_copilot_usage_key_email",
         F.when(
