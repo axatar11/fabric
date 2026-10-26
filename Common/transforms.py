@@ -211,6 +211,53 @@ def join_okta_on_user_email(
     return on_login.unionByName(on_full).dropDuplicates()
 
 
+def purview_copilot_email_fallback(email_col: Column) -> Column:
+    """Alternate email when local part starts with ``10`` (strip first two characters)."""
+    return F.when(
+        email_col.rlike(r"^10[^@]*@"),
+        F.substring(email_col, 3, F.length(email_col)),
+    )
+
+
+def join_okta_purview_with_fallback(
+    base: DataFrame,
+    okta_slim: DataFrame,
+    user_email_col: str,
+    fallback_email_col: str,
+) -> DataFrame:
+    """Left join Okta on primary email, then fallback email when primary has no match."""
+    user = F.col(user_email_col)
+    fallback = F.col(fallback_email_col)
+    okta_cols = [
+        "OktaUserId",
+        "OktaUserEmail",
+        "OktaUserFullEmail",
+        "OktaUserEmployeeNumber",
+        "OktaUserFullName",
+        "OktaUserRegion",
+        "OktaUserCountry",
+    ]
+    o1 = okta_slim.select(*[F.col(c).alias(f"_o1_{c}") for c in okta_cols])
+    o2 = okta_slim.select(*[F.col(c).alias(f"_o2_{c}") for c in okta_cols])
+    primary = (user == F.col("_o1_OktaUserEmail")) | (user == F.col("_o1_OktaUserFullEmail"))
+    step1 = base.join(o1, primary, "left")
+    fb_match = (fallback == F.col("_o2_OktaUserEmail")) | (
+        fallback == F.col("_o2_OktaUserFullEmail")
+    )
+    fallback_cond = F.col("_o1_OktaUserId").isNull() & fallback.isNotNull() & fb_match
+    step2 = step1.join(o2, fallback_cond, "left")
+    out = step2
+    for col_name in okta_cols:
+        out = out.withColumn(
+            col_name,
+            F.when(F.col("_o1_OktaUserId").isNotNull(), F.col(f"_o1_{col_name}")).otherwise(
+                F.col(f"_o2_{col_name}")
+            ),
+        )
+    drop = [f"_o1_{c}" for c in okta_cols] + [f"_o2_{c}" for c in okta_cols]
+    return out.drop(*drop)
+
+
 def join_hc_on_email_keys(
     joined: DataFrame,
     hc_slim: DataFrame,
@@ -427,6 +474,11 @@ def build_purview_copilot_usage_silver(
     base = base.dropDuplicates(["purview_copilot_usage_record_id"])
 
     base = base.withColumn(
+        "purview_copilot_usage_email_fallback",
+        purview_copilot_email_fallback(F.col("purview_copilot_usage_email")),
+    )
+
+    base = base.withColumn(
         "purview_copilot_usage_has_prompt",
         F.col("purview_copilot_usage_prompt_count") > 0,
     ).withColumn(
@@ -459,7 +511,12 @@ def build_purview_copilot_usage_silver(
         "OktaUserRegion",
         "OktaUserCountry",
     )
-    joined = join_okta_on_user_email(base, okta_slim, "purview_copilot_usage_email")
+    joined = join_okta_purview_with_fallback(
+        base,
+        okta_slim,
+        "purview_copilot_usage_email",
+        "purview_copilot_usage_email_fallback",
+    )
     joined = joined.withColumn(
         "purview_copilot_usage_key_email",
         F.when(
@@ -507,6 +564,7 @@ def build_purview_copilot_usage_silver(
         "purview_copilot_usage_record_type",
         "purview_copilot_usage_operation",
         "purview_copilot_usage_email",
+        "purview_copilot_usage_email_fallback",
         "purview_copilot_usage_associated_admin_units",
         "purview_copilot_usage_associated_admin_units_names",
         "purview_copilot_usage_app_identity",
