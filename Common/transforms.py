@@ -226,7 +226,7 @@ def join_okta_purview_with_fallback(
     user_email_col: str,
     fallback_email_col: str,
 ) -> DataFrame:
-    """Left join Okta on primary email, then fallback email when primary has no match."""
+    """Left join Okta: primary email (short then full), else fallback email — equi-joins only."""
     user = F.col(user_email_col)
     fallback = F.col(fallback_email_col)
     okta_cols = [
@@ -238,25 +238,34 @@ def join_okta_purview_with_fallback(
         "OktaUserRegion",
         "OktaUserCountry",
     ]
-    o1 = okta_slim.select(*[F.col(c).alias(f"_o1_{c}") for c in okta_cols])
-    o2 = okta_slim.select(*[F.col(c).alias(f"_o2_{c}") for c in okta_cols])
-    primary = (user == F.col("_o1_OktaUserEmail")) | (user == F.col("_o1_OktaUserFullEmail"))
-    step1 = base.join(o1, primary, "left")
-    fb_match = (fallback == F.col("_o2_OktaUserEmail")) | (
-        fallback == F.col("_o2_OktaUserFullEmail")
-    )
-    fallback_cond = F.col("_o1_OktaUserId").isNull() & fallback.isNotNull() & fb_match
-    step2 = step1.join(o2, fallback_cond, "left")
-    out = step2
-    for col_name in okta_cols:
+
+    def _coalesce_prefixed(df: DataFrame, prefixes: list[str]) -> DataFrame:
+        out = df
+        for name in okta_cols:
+            out = out.withColumn(name, F.coalesce(*[F.col(f"{p}{name}") for p in prefixes]))
+        drop = [f"{p}{c}" for p in prefixes for c in okta_cols]
+        return out.drop(*[c for c in drop if c in out.columns])
+
+    p1 = okta_slim.select(*[F.col(c).alias(f"_p1_{c}") for c in okta_cols])
+    p2 = okta_slim.select(*[F.col(c).alias(f"_p2_{c}") for c in okta_cols])
+    primary = base.join(p1, user == F.col("_p1_OktaUserEmail"), "left")
+    primary = primary.join(p2, user == F.col("_p2_OktaUserFullEmail"), "left")
+    primary = _coalesce_prefixed(primary, ["_p1_", "_p2_"])
+
+    f1 = okta_slim.select(*[F.col(c).alias(f"_f1_{c}") for c in okta_cols])
+    f2 = okta_slim.select(*[F.col(c).alias(f"_f2_{c}") for c in okta_cols])
+    with_fb = primary.join(f1, fallback == F.col("_f1_OktaUserEmail"), "left")
+    with_fb = with_fb.join(f2, fallback == F.col("_f2_OktaUserFullEmail"), "left")
+    out = with_fb
+    for name in okta_cols:
         out = out.withColumn(
-            col_name,
-            F.when(F.col("_o1_OktaUserId").isNotNull(), F.col(f"_o1_{col_name}")).otherwise(
-                F.col(f"_o2_{col_name}")
+            name,
+            F.when(F.col("OktaUserId").isNotNull(), F.col(name)).otherwise(
+                F.coalesce(F.col(f"_f1_{name}"), F.col(f"_f2_{name}"))
             ),
         )
-    drop = [f"_o1_{c}" for c in okta_cols] + [f"_o2_{c}" for c in okta_cols]
-    return out.drop(*drop)
+    drop_fb = [f"_f1_{c}" for c in okta_cols] + [f"_f2_{c}" for c in okta_cols]
+    return out.drop(*[c for c in drop_fb if c in out.columns])
 
 
 def join_hc_on_email_keys(
@@ -504,18 +513,21 @@ def build_purview_copilot_usage_silver(
     )
 
     okta_slim = okta.select(
-        "OktaUserId",
-        "OktaUserEmail",
-        "OktaUserFullEmail",
-        "OktaUserEmployeeNumber",
-        "OktaUserFullName",
-        "OktaUserRegion",
-        "OktaUserCountry",
+        F.col("OktaUserId"),
+        F.lower(F.trim(F.col("OktaUserEmail"))).alias("OktaUserEmail"),
+        F.lower(F.trim(F.col("OktaUserFullEmail"))).alias("OktaUserFullEmail"),
+        F.col("OktaUserEmployeeNumber"),
+        F.col("OktaUserFullName"),
+        F.col("OktaUserRegion"),
+        F.col("OktaUserCountry"),
     )
-    # Fast path (pre-spec): equi inner joins on primary email — same as before PR #105.
-    # ``purview_copilot_usage_email_fallback`` is still populated for reporting; Okta fallback
-    # matching (left join + fallback email) stays in ``join_okta_purview_with_fallback`` for later.
-    joined = join_okta_on_user_email(base, okta_slim, "purview_copilot_usage_email")
+    joined = join_okta_purview_with_fallback(
+        base,
+        okta_slim,
+        "purview_copilot_usage_email",
+        "purview_copilot_usage_email_fallback",
+    )
+    joined = joined.dropDuplicates(["purview_copilot_usage_record_id"])
     joined = joined.withColumn(
         "purview_copilot_usage_key_email",
         F.when(
