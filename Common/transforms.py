@@ -258,11 +258,11 @@ def join_okta_purview_with_fallback(
     with_fb = with_fb.join(f2, fallback == F.col("_f2_OktaUserFullEmail"), "left")
     out = with_fb
     for name in okta_cols:
+        # Primary match fills `name`; fallback-only must not keep null emails when OktaUserId
+        # was already set from a prior column in this loop (when/when bug on fallback path).
         out = out.withColumn(
             name,
-            F.when(F.col("OktaUserId").isNotNull(), F.col(name)).otherwise(
-                F.coalesce(F.col(f"_f1_{name}"), F.col(f"_f2_{name}"))
-            ),
+            F.coalesce(F.col(name), F.col(f"_f1_{name}"), F.col(f"_f2_{name}")),
         )
     drop_fb = [f"_f1_{c}" for c in okta_cols] + [f"_f2_{c}" for c in okta_cols]
     return out.drop(*[c for c in drop_fb if c in out.columns])
