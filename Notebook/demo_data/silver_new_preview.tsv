@@ -1,4 +1,0 @@
-purview_copilot_usage_email	purview_copilot_usage_email_fallback	okta_user_id	okta_user_email	purview_copilot_usage_prompt_count
-10jane.doe@corp.com	jane.doe@corp.com	okta-jane	jane.doe@corp.com	1
-bob.smith@corp.com	null	okta-bob	bob.smith@corp.com	1
-10no.okta@corp.com	no.okta@corp.com	null	null	1

@@ -4,5 +4,3 @@ __pycache__/
 Common/__pycache__/
 *.pyc
 .ipynb_checkpoints/
-tests/cursor_demo/out/*
-!tests/cursor_demo/out/.gitkeep
