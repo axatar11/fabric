@@ -1,3 +1,0 @@
-{"RecordId":"r1","CreationDate":"2026-09-15T10:00:00","UserId":"10jane.doe@corp.com","AuditData":"{\"AppIdentity\":\"Copilot.M365Copilot.WebChat\",\"CopilotEventData\":{\"Messages\":[{\"isPrompt\":true}]}}"}
-{"RecordId":"r2","CreationDate":"2026-09-16T10:00:00","UserId":"bob.smith@corp.com","AuditData":"{\"AppIdentity\":\"Copilot.M365Copilot.Apps\",\"CopilotEventData\":{\"Messages\":[{\"isPrompt\":true}]}}"}
-{"RecordId":"r3","CreationDate":"2026-09-17T10:00:00","UserId":"10no.okta@corp.com","AuditData":"{\"AppIdentity\":\"Copilot.M365Copilot.WebChat\",\"CopilotEventData\":{\"Messages\":[{\"isPrompt\":true}]}}"}
