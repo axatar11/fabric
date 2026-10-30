@@ -50,9 +50,11 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         ),
         config.TABLE_HC_SILVER: onelake_table_path(med, "Silver/hc_silver_historical"),
         config.TABLE_OKTA_SILVER: onelake_table_path(med, "Silver/okta_user_for_ai"),
-        config.TABLE_CURSOR_SILVER: onelake_table_path(med, "Silver/cursor_usage"),
+        config.TABLE_CURSOR_SILVER: onelake_table_path(
+            med, f"Silver/cursor_usage{config.CURSOR_TABLE_SUFFIX}"
+        ),
         config.TABLE_CURSOR_OKTA_REJECT: onelake_table_path(
-            med, "Silver/cursor_usage_okta_reject"
+            med, f"Silver/cursor_usage_okta_reject{config.CURSOR_TABLE_SUFFIX}"
         ),
         config.TABLE_PURVIEW_COPILOT_SILVER: onelake_table_path(
             med, "Silver/purview_copilot_usage"
@@ -61,16 +63,23 @@ def delta_path_for_table(table_fqn: str) -> str | None:
     active_fqn = getattr(
         config, "TABLE_FACT_CURSOR_ACTIVE", _default_gold_table_fqn("fact_cursor_active")
     )
+    _cursor_sfx = getattr(config, "CURSOR_TABLE_SUFFIX", "")
     mapping[active_fqn] = onelake_table_path(
         med,
-        os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ACTIVE", "Gold/fact_cursor_active"),
+        os.environ.get(
+            "ONELAKE_GOLD_FACT_CURSOR_ACTIVE",
+            f"Gold/fact_cursor_active{_cursor_sfx}",
+        ),
     )
     onboard_fqn = getattr(
         config, "TABLE_FACT_CURSOR_ONBOARD", _default_gold_table_fqn("fact_cursor_onboard")
     )
     mapping[onboard_fqn] = onelake_table_path(
         med,
-        os.environ.get("ONELAKE_GOLD_FACT_CURSOR_ONBOARD", "Gold/fact_cursor_onboard"),
+        os.environ.get(
+            "ONELAKE_GOLD_FACT_CURSOR_ONBOARD",
+            f"Gold/fact_cursor_onboard{_cursor_sfx}",
+        ),
     )
     copilot_active_fqn = getattr(
         config, "TABLE_FACT_COPILOT_ACTIVE", _default_gold_table_fqn("fact_copilot_active")
@@ -1019,10 +1028,12 @@ def closed_month_nos_for_gold_merge(
     except Exception:
         gold_months = []
 
+    batch_max = max(batch_months)
+    closed = sorted(m for m in gold_months if m < batch_max)
     extra = parse_month_no_list(os.environ.get("MEDALLION_CURSOR_GOLD_CLOSED_MONTHS"))
-    from Common.cursor_demo_rules import closed_month_nos_from_lists
-
-    return closed_month_nos_from_lists(gold_months, batch_months, extra)
+    if extra:
+        closed = sorted(set(closed) | set(extra))
+    return closed, batch_max
 
 
 def append_table(df: DataFrame, table_name: str) -> None:
