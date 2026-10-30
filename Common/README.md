@@ -51,6 +51,8 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`publish_merge_staging(df, fqn)`** | Write transform result to `merge_staging/` for merge/overwrite. |
 | **`write_full_table(df, fqn)`** | Full **overwrite** silver tables (HC/Okta) via staging → deltalake. |
 | **`merge_incremental(spark, df, fqn, key)`** | Delta **merge** (cursor_usage silver, gold facts) from staging parquet chunks. |
+| **`append_table(df, fqn)`** | Append-only Delta write (e.g. cursor Okta join rejects). |
+| **`parse_month_no_list(...)`** | Parse `202610,202611` for closed-month gold filters. |
 
 ---
 
