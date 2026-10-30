@@ -1001,11 +1001,8 @@ def closed_month_nos_for_gold_merge(
     The latest month in the batch stays open for daily incremental merges.
     Optional env ``MEDALLION_CURSOR_GOLD_CLOSED_MONTHS`` adds extra closed months (union).
     """
-    from pyspark.sql import functions as F
-
-    max_row = batch_df.agg(F.max(F.col(month_col).cast("int")).alias("_max")).collect()
-    batch_max = int(max_row[0]["_max"]) if max_row and max_row[0]["_max"] is not None else None
-    if batch_max is None:
+    batch_months = _distinct_month_nos(batch_df, month_col)
+    if not batch_months:
         return [], None
 
     gold_months: list[int] = []
@@ -1022,11 +1019,10 @@ def closed_month_nos_for_gold_merge(
     except Exception:
         gold_months = []
 
-    closed = sorted(m for m in gold_months if m < batch_max)
     extra = parse_month_no_list(os.environ.get("MEDALLION_CURSOR_GOLD_CLOSED_MONTHS"))
-    if extra:
-        closed = sorted(set(closed) | set(extra))
-    return closed, batch_max
+    from Common.cursor_demo_rules import closed_month_nos_from_lists
+
+    return closed_month_nos_from_lists(gold_months, batch_months, extra)
 
 
 def append_table(df: DataFrame, table_name: str) -> None:
