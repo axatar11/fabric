@@ -51,6 +51,9 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_HC_SILVER: onelake_table_path(med, "Silver/hc_silver_historical"),
         config.TABLE_OKTA_SILVER: onelake_table_path(med, "Silver/okta_user_for_ai"),
         config.TABLE_CURSOR_SILVER: onelake_table_path(med, "Silver/cursor_usage"),
+        config.TABLE_CURSOR_OKTA_REJECT: onelake_table_path(
+            med, "Silver/cursor_usage_okta_reject"
+        ),
         config.TABLE_PURVIEW_COPILOT_SILVER: onelake_table_path(
             med, "Silver/purview_copilot_usage"
         ),
@@ -960,6 +963,96 @@ def _deltalake_table_exists(path: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def parse_month_no_list(raw: str | list[int] | None) -> list[int]:
+    """Parse ``202610,202611`` or a list of YYYYMM ints for closed-month filters."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [int(x) for x in raw]
+    text = str(raw).strip()
+    if not text:
+        return []
+    return [int(part) for part in text.replace(" ", "").split(",") if part]
+
+
+def _distinct_month_nos(df: DataFrame, month_col: str) -> list[int]:
+    from pyspark.sql import functions as F
+
+    rows = (
+        df.select(F.col(month_col).cast("int").alias("_m"))
+        .where(F.col("_m").isNotNull())
+        .distinct()
+        .collect()
+    )
+    return sorted(int(r["_m"]) for r in rows)
+
+
+def closed_month_nos_for_gold_merge(
+    spark: SparkSession,
+    gold_table: str,
+    batch_df: DataFrame,
+    month_col: str = "Month_No",
+) -> tuple[list[int], int | None]:
+    """Months in gold strictly before the batch's max month — auto-closed, no manual list.
+
+    When you first merge November, October (already in gold) is excluded from the batch.
+    The latest month in the batch stays open for daily incremental merges.
+    Optional env ``MEDALLION_CURSOR_GOLD_CLOSED_MONTHS`` adds extra closed months (union).
+    """
+    batch_months = _distinct_month_nos(batch_df, month_col)
+    if not batch_months:
+        return [], None
+
+    gold_months: list[int] = []
+    path = _onelake_delta_path(gold_table)
+    try:
+        if path and _use_deltalake_read():
+            if _deltalake_table_exists(path):
+                gold_df = read_table(spark, gold_table)
+                gold_months = _distinct_month_nos(gold_df, month_col)
+        else:
+            gold_df = read_table(spark, gold_table)
+            if gold_df.limit(1).count() > 0:
+                gold_months = _distinct_month_nos(gold_df, month_col)
+    except Exception:
+        gold_months = []
+
+    extra = parse_month_no_list(os.environ.get("MEDALLION_CURSOR_GOLD_CLOSED_MONTHS"))
+    from Common.cursor_demo_rules import closed_month_nos_from_lists
+
+    return closed_month_nos_from_lists(gold_months, batch_months, extra)
+
+
+def append_table(df: DataFrame, table_name: str) -> None:
+    """Append rows to a Delta table (creates the table if it does not exist)."""
+    path = _onelake_delta_path(table_name)
+    staging = merge_staging_path(table_name)
+    if path and _use_deltalake_onelake_write():
+        apply_local_merge_spark_conf(df.sparkSession)
+        safe = table_name.replace(".", "__")
+        df = break_lineage_local(df.sparkSession, df, f"append_break_{safe}")
+        publish_merge_staging(df, table_name)
+        if not staging.is_dir() or not any(staging.glob("*.parquet")):
+            raise RuntimeError(
+                f"No merge staging parquet at {staging}. "
+                f"Re-run transform, then append_table(your_df, {table_name!r})."
+            )
+        exists = _deltalake_table_exists(path)
+        _deltalake_write_staging_batches(
+            staging, path, mode="append" if exists else "overwrite"
+        )
+        return
+    writer = df.write.format("delta").mode("append")
+    if path:
+        from Common.fabric_storage import apply_azure_cli_abfs_conf
+
+        apply_azure_cli_abfs_conf(df.sparkSession)
+        _read_debug(f"append_table: pyspark save {path}")
+        writer.save(path)
+        return
+    writer.saveAsTable(table_name)
 
 
 def write_full_table(df: DataFrame | None, table_name: str) -> None:

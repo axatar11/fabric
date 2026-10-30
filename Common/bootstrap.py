@@ -304,7 +304,12 @@ def _notebook_reload_io_helpers(
     ng["read_table_broken_lineage"] = _bind_read_table_broken_lineage(spark)
     ng["load_delta_path"] = lambda path: io.load_delta_path(spark, path)
     ng["write_full_table"] = io.write_full_table
+    ng["append_table"] = io.append_table
     ng["merge_incremental"] = io.merge_incremental
+    ng["parse_month_no_list"] = io.parse_month_no_list
+    ng["closed_month_nos_for_gold_merge"] = io.closed_month_nos_for_gold_merge
+    ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
+    ng["exclude_month_nos"] = transforms.exclude_month_nos
     ng["save_table_cache"] = io.save_table_cache
     ng["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
     ng["apply_local_merge_spark_conf"] = io.apply_local_merge_spark_conf
@@ -354,7 +359,10 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "load_delta_path": lambda path: io.load_delta_path(spark, path),
             "bronze_cursor_path": config.ONELAKE_CURSOR_BRONZE_PATH,
             "write_full_table": io.write_full_table,
+            "append_table": io.append_table,
             "merge_incremental": io.merge_incremental,
+            "parse_month_no_list": io.parse_month_no_list,
+            "closed_month_nos_for_gold_merge": io.closed_month_nos_for_gold_merge,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
             "break_lineage_local": _bind_break_lineage_local(spark),
             "publish_merge_staging": io.publish_merge_staging,
@@ -364,6 +372,8 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "load_country_lookup": transforms.load_country_lookup,
             "with_normalized_country": transforms.with_normalized_country,
             "cursor_usage_record_key": transforms.cursor_usage_record_key,
+            "split_cursor_okta_join": transforms.split_cursor_okta_join,
+            "exclude_month_nos": transforms.exclude_month_nos,
             "cursor_active_daily_aggregate": transforms.cursor_active_daily_aggregate,
             "cursor_active_daily_merge_key": transforms.cursor_active_daily_merge_key,
             "cursor_onboard_daily_dedupe": transforms.cursor_onboard_daily_dedupe,

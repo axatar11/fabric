@@ -64,6 +64,14 @@ def with_normalized_country(
 
 def join_okta_for_cursor_usage(base: DataFrame, okta_slim: DataFrame) -> DataFrame:
     """Equi-joins only (no OR) — avoids BroadcastNestedLoopJoin on local Windows Spark."""
+    joined, _rejects = split_cursor_okta_join(base, okta_slim)
+    return joined
+
+
+def split_cursor_okta_join(
+    base: DataFrame, okta_slim: DataFrame
+) -> tuple[DataFrame, DataFrame]:
+    """Return (Okta-matched rows, base rows with no Okta match)."""
     on_login = base.join(
         okta_slim,
         base.CursorUsageUser == okta_slim.OktaUserEmail,
@@ -74,7 +82,17 @@ def join_okta_for_cursor_usage(base: DataFrame, okta_slim: DataFrame) -> DataFra
         base.CursorUsageUser == okta_slim.OktaUserFullEmail,
         "inner",
     )
-    return on_login.unionByName(on_full).dropDuplicates()
+    joined = on_login.unionByName(on_full).dropDuplicates()
+    matched = joined.select(*base.columns).dropDuplicates()
+    rejects = base.join(matched, base.columns, "left_anti")
+    return joined, rejects
+
+
+def exclude_month_nos(df: DataFrame, month_col: str, closed_month_nos: list[int]) -> DataFrame:
+    """Drop rows whose ``month_col`` is in ``closed_month_nos`` (closed reporting months)."""
+    if not closed_month_nos:
+        return df
+    return df.filter(~F.col(month_col).isin(closed_month_nos))
 
 
 def join_hc_for_cursor_usage(
