@@ -977,6 +977,58 @@ def parse_month_no_list(raw: str | list[int] | None) -> list[int]:
     return [int(part) for part in text.replace(" ", "").split(",") if part]
 
 
+def _distinct_month_nos(df: DataFrame, month_col: str) -> list[int]:
+    from pyspark.sql import functions as F
+
+    rows = (
+        df.select(F.col(month_col).cast("int").alias("_m"))
+        .where(F.col("_m").isNotNull())
+        .distinct()
+        .collect()
+    )
+    return sorted(int(r["_m"]) for r in rows)
+
+
+def closed_month_nos_for_gold_merge(
+    spark: SparkSession,
+    gold_table: str,
+    batch_df: DataFrame,
+    month_col: str = "Month_No",
+) -> tuple[list[int], int | None]:
+    """Months in gold strictly before the batch's max month — auto-closed, no manual list.
+
+    When you first merge November, October (already in gold) is excluded from the batch.
+    The latest month in the batch stays open for daily incremental merges.
+    Optional env ``MEDALLION_CURSOR_GOLD_CLOSED_MONTHS`` adds extra closed months (union).
+    """
+    from pyspark.sql import functions as F
+
+    max_row = batch_df.agg(F.max(F.col(month_col).cast("int")).alias("_max")).collect()
+    batch_max = int(max_row[0]["_max"]) if max_row and max_row[0]["_max"] is not None else None
+    if batch_max is None:
+        return [], None
+
+    gold_months: list[int] = []
+    path = _onelake_delta_path(gold_table)
+    try:
+        if path and _use_deltalake_read():
+            if _deltalake_table_exists(path):
+                gold_df = read_table(spark, gold_table)
+                gold_months = _distinct_month_nos(gold_df, month_col)
+        else:
+            gold_df = read_table(spark, gold_table)
+            if gold_df.limit(1).count() > 0:
+                gold_months = _distinct_month_nos(gold_df, month_col)
+    except Exception:
+        gold_months = []
+
+    closed = sorted(m for m in gold_months if m < batch_max)
+    extra = parse_month_no_list(os.environ.get("MEDALLION_CURSOR_GOLD_CLOSED_MONTHS"))
+    if extra:
+        closed = sorted(set(closed) | set(extra))
+    return closed, batch_max
+
+
 def append_table(df: DataFrame, table_name: str) -> None:
     """Append rows to a Delta table (creates the table if it does not exist)."""
     path = _onelake_delta_path(table_name)
