@@ -34,11 +34,11 @@ Same line in:
 
 **`CURSOR_CLOSE_MONTH_NO = None`** everywhere. Run pipeline as usual.
 
-## Tables (default `_abdellah`)
+## Tables
 
 | Silver | Gold |
 |--------|------|
-| `okta_user_for_ai` | `fact_cursor_active_abdellah` |
-| `hc_silver_historical` | `fact_cursor_onboard_abdellah` |
-| `cursor_usage_abdellah` | |
-| `cursor_usage_okta_reject_abdellah` | |
+| `okta_user_for_ai` | `fact_cursor_active` |
+| `hc_silver_historical` | `fact_cursor_onboard` |
+| `cursor_usage` | |
+| `cursor_usage_okta_reject` | |
