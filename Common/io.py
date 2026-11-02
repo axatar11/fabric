@@ -978,13 +978,84 @@ def _deltalake_table_exists(path: str) -> bool:
 
 
 def parse_process_month_no(raw: str | int | None) -> int | None:
-    """Single YYYYMM for month-close runs (``MEDALLION_CURSOR_PROCESS_MONTH_NO``)."""
+    """Parse YYYYMM int or None."""
     if raw is None:
         return None
     if isinstance(raw, int):
         return raw
     text = str(raw).strip()
     return int(text) if text else None
+
+
+def sync_cursor_close_month_env(month_no: int | None) -> None:
+    """Set env from notebook ``CURSOR_CLOSE_MONTH_NO`` before ``%run bootstrap``."""
+    if month_no is not None:
+        os.environ["MEDALLION_CURSOR_CLOSE_MONTH_NO"] = str(int(month_no))
+    else:
+        os.environ.pop("MEDALLION_CURSOR_CLOSE_MONTH_NO", None)
+
+
+def cursor_close_month_no() -> int | None:
+    """Active month-close YYYYMM from env (``MEDALLION_CURSOR_CLOSE_MONTH_NO``)."""
+    raw = os.environ.get("MEDALLION_CURSOR_CLOSE_MONTH_NO", "").strip()
+    if not raw:
+        raw = os.environ.get("MEDALLION_CURSOR_PROCESS_MONTH_NO", "").strip()
+    return parse_process_month_no(raw or None)
+
+
+def replace_one_month_in_frame(
+    spark: SparkSession,
+    table_name: str,
+    month_df: DataFrame,
+    month_col: str,
+    month_no: int,
+) -> DataFrame:
+    """Keep other months from target table; replace rows for ``month_no`` with ``month_df``."""
+    from pyspark.sql import functions as F
+
+    try:
+        existing = read_table(spark, table_name)
+        if existing.limit(1).count() > 0:
+            kept = existing.filter(F.col(month_col).cast("int") != F.lit(int(month_no)))
+            if month_df.limit(1).count() > 0:
+                return kept.unionByName(month_df, allowMissingColumns=True)
+            return kept
+    except Exception:
+        pass
+    return month_df
+
+
+def append_cursor_freeze_month(
+    spark: SparkSession,
+    month_no: int,
+    *,
+    frozen_by: str = "cursor_pipeline",
+    notes: str = "Month-close auto-freeze",
+) -> None:
+    """Append ``ingest_freeze_control`` row for Cursor (skip if already frozen)."""
+    from datetime import datetime, timezone
+
+    from pyspark.sql import Row
+
+    from Common import config
+
+    if month_no in read_cursor_frozen_month_nos(spark):
+        _read_progress(f"freeze: Month_No {month_no} already in ingest_freeze_control — skip")
+        return
+    ts = datetime.now(timezone.utc)
+    df = spark.createDataFrame(
+        [
+            Row(
+                product="cursor",
+                Month_No=int(month_no),
+                frozen_at=ts,
+                frozen_by=frozen_by,
+                notes=notes,
+            )
+        ]
+    )
+    append_table(df, config.TABLE_INGEST_FREEZE_CONTROL)
+    _read_progress(f"freeze: appended Month_No {month_no} to ingest_freeze_control")
 
 
 def parse_month_no_list(raw: str | list[int] | None) -> list[int]:
