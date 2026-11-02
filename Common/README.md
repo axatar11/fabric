@@ -53,7 +53,10 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`merge_incremental(spark, df, fqn, key)`** | Delta **merge** (cursor_usage silver, gold facts) from staging parquet chunks. |
 | **`append_table(df, fqn)`** | Append-only Delta write (e.g. cursor Okta join rejects). |
 | **`read_cursor_frozen_month_nos(spark)`** | `Month_No` list from `Gold.ingest_freeze_control`. |
-| **`cursor_excluded_month_nos(spark, gold_table, batch_df)`** | Freeze control (+ optional auto-close if `MEDALLION_CURSOR_AUTO_CLOSE_FROM_GOLD=1`). |
+| **`sync_cursor_close_month_env(month_no)`** | Notebook helper: set `MEDALLION_CURSOR_CLOSE_MONTH_NO` before bootstrap. |
+| **`cursor_excluded_month_nos(spark, gold_table, batch_df)`** | Frozen `Month_No` list from `ingest_freeze_control` (+ batch max for logs). |
+| **`append_cursor_freeze_month(spark, month_no)`** | Append cursor freeze row after month-close onboard gold. |
+| **`replace_one_month_in_frame(...)`** | HC month-close: replace one `Month_No` in silver target. |
 
 ---
 
