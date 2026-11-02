@@ -306,12 +306,12 @@ def _notebook_reload_io_helpers(
     ng["write_full_table"] = io.write_full_table
     ng["append_table"] = io.append_table
     ng["merge_incremental"] = io.merge_incremental
-    ng["parse_month_no_list"] = io.parse_month_no_list
-    ng["parse_process_month_no"] = io.parse_process_month_no
     ng["filter_to_month_no"] = transforms.filter_to_month_no
-    ng["closed_month_nos_for_gold_merge"] = io.closed_month_nos_for_gold_merge
     ng["read_cursor_frozen_month_nos"] = io.read_cursor_frozen_month_nos
     ng["cursor_excluded_month_nos"] = io.cursor_excluded_month_nos
+    ng["sync_cursor_close_month_env"] = io.sync_cursor_close_month_env
+    ng["append_cursor_freeze_month"] = io.append_cursor_freeze_month
+    ng["replace_one_month_in_frame"] = io.replace_one_month_in_frame
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
     ng["exclude_month_nos"] = transforms.exclude_month_nos
     ng["save_table_cache"] = io.save_table_cache
@@ -365,12 +365,12 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "write_full_table": io.write_full_table,
             "append_table": io.append_table,
             "merge_incremental": io.merge_incremental,
-            "parse_month_no_list": io.parse_month_no_list,
-            "parse_process_month_no": io.parse_process_month_no,
             "filter_to_month_no": transforms.filter_to_month_no,
-            "closed_month_nos_for_gold_merge": io.closed_month_nos_for_gold_merge,
             "read_cursor_frozen_month_nos": io.read_cursor_frozen_month_nos,
             "cursor_excluded_month_nos": io.cursor_excluded_month_nos,
+            "sync_cursor_close_month_env": io.sync_cursor_close_month_env,
+            "append_cursor_freeze_month": io.append_cursor_freeze_month,
+            "replace_one_month_in_frame": io.replace_one_month_in_frame,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
             "break_lineage_local": _bind_break_lineage_local(spark),
             "publish_merge_staging": io.publish_merge_staging,
@@ -400,6 +400,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     for name in config.CONFIG_NAMES:
         if hasattr(config, name):
             notebook_globals[name] = getattr(config, name)
+    notebook_globals["CURSOR_CLOSE_MONTH_NO"] = io.cursor_close_month_no()
     if "TABLE_FACT_CURSOR_ONBOARD" not in notebook_globals:
         notebook_globals["TABLE_FACT_CURSOR_ONBOARD"] = (
             f"{config.GOLD_DATABASE}.{config.GOLD_SCHEMA}.fact_cursor_onboard"

@@ -978,7 +978,7 @@ def _deltalake_table_exists(path: str) -> bool:
 
 
 def parse_process_month_no(raw: str | int | None) -> int | None:
-    """Single YYYYMM for month-close runs (``MEDALLION_CURSOR_PROCESS_MONTH_NO``)."""
+    """Parse YYYYMM int or None (used for ``MEDALLION_CURSOR_CLOSE_MONTH_NO``)."""
     if raw is None:
         return None
     if isinstance(raw, int):
@@ -987,16 +987,73 @@ def parse_process_month_no(raw: str | int | None) -> int | None:
     return int(text) if text else None
 
 
-def parse_month_no_list(raw: str | list[int] | None) -> list[int]:
-    """Parse ``202610,202611`` or a list of YYYYMM ints for closed-month filters."""
-    if raw is None:
-        return []
-    if isinstance(raw, list):
-        return [int(x) for x in raw]
-    text = str(raw).strip()
-    if not text:
-        return []
-    return [int(part) for part in text.replace(" ", "").split(",") if part]
+def sync_cursor_close_month_env(month_no: int | None) -> None:
+    """Set env from notebook ``CURSOR_CLOSE_MONTH_NO`` before ``%run bootstrap``."""
+    if month_no is not None:
+        os.environ["MEDALLION_CURSOR_CLOSE_MONTH_NO"] = str(int(month_no))
+    else:
+        os.environ.pop("MEDALLION_CURSOR_CLOSE_MONTH_NO", None)
+
+
+def cursor_close_month_no() -> int | None:
+    """Active month-close YYYYMM from env (``MEDALLION_CURSOR_CLOSE_MONTH_NO``)."""
+    raw = os.environ.get("MEDALLION_CURSOR_CLOSE_MONTH_NO", "").strip()
+    return parse_process_month_no(raw or None)
+
+
+def replace_one_month_in_frame(
+    spark: SparkSession,
+    table_name: str,
+    month_df: DataFrame,
+    month_col: str,
+    month_no: int,
+) -> DataFrame:
+    """Keep other months from target table; replace rows for ``month_no`` with ``month_df``."""
+    from pyspark.sql import functions as F
+
+    try:
+        existing = read_table(spark, table_name)
+        if existing.limit(1).count() > 0:
+            kept = existing.filter(F.col(month_col).cast("int") != F.lit(int(month_no)))
+            if month_df.limit(1).count() > 0:
+                return kept.unionByName(month_df, allowMissingColumns=True)
+            return kept
+    except Exception:
+        pass
+    return month_df
+
+
+def append_cursor_freeze_month(
+    spark: SparkSession,
+    month_no: int,
+    *,
+    frozen_by: str = "cursor_pipeline",
+    notes: str = "Month-close auto-freeze",
+) -> None:
+    """Append ``ingest_freeze_control`` row for Cursor (skip if already frozen)."""
+    from datetime import datetime, timezone
+
+    from pyspark.sql import Row
+
+    from Common import config
+
+    if month_no in read_cursor_frozen_month_nos(spark):
+        _read_progress(f"freeze: Month_No {month_no} already in ingest_freeze_control — skip")
+        return
+    ts = datetime.now(timezone.utc)
+    df = spark.createDataFrame(
+        [
+            Row(
+                product="cursor",
+                Month_No=int(month_no),
+                frozen_at=ts,
+                frozen_by=frozen_by,
+                notes=notes,
+            )
+        ]
+    )
+    append_table(df, config.TABLE_INGEST_FREEZE_CONTROL)
+    _read_progress(f"freeze: appended Month_No {month_no} to ingest_freeze_control")
 
 
 def _distinct_month_nos(df: DataFrame, month_col: str) -> list[int]:
@@ -1038,58 +1095,12 @@ def cursor_excluded_month_nos(
     batch_df: DataFrame,
     month_col: str = "Month_No",
 ) -> tuple[list[int], int | None]:
-    """Months to skip on silver/gold merge: freeze control (+ optional auto-close from gold)."""
-    excluded = set(read_cursor_frozen_month_nos(spark))
+    """Months to skip on gold merge: ``ingest_freeze_control`` for cursor (``gold_table`` unused)."""
+    _ = gold_table
+    excluded = read_cursor_frozen_month_nos(spark)
     batch_months = _distinct_month_nos(batch_df, month_col)
     batch_max = max(batch_months) if batch_months else None
-    if os.environ.get("MEDALLION_CURSOR_AUTO_CLOSE_FROM_GOLD", "0").lower() in (
-        "1",
-        "true",
-        "yes",
-    ):
-        auto, batch_max = closed_month_nos_for_gold_merge(
-            spark, gold_table, batch_df, month_col
-        )
-        excluded.update(auto)
-    return sorted(excluded), batch_max
-
-
-def closed_month_nos_for_gold_merge(
-    spark: SparkSession,
-    gold_table: str,
-    batch_df: DataFrame,
-    month_col: str = "Month_No",
-) -> tuple[list[int], int | None]:
-    """Months in gold strictly before the batch's max month — auto-closed, no manual list.
-
-    When you first merge November, October (already in gold) is excluded from the batch.
-    The latest month in the batch stays open for daily incremental merges.
-    Optional env ``MEDALLION_CURSOR_GOLD_CLOSED_MONTHS`` adds extra closed months (union).
-    """
-    batch_months = _distinct_month_nos(batch_df, month_col)
-    if not batch_months:
-        return [], None
-
-    gold_months: list[int] = []
-    path = _onelake_delta_path(gold_table)
-    try:
-        if path and _use_deltalake_read():
-            if _deltalake_table_exists(path):
-                gold_df = read_table(spark, gold_table)
-                gold_months = _distinct_month_nos(gold_df, month_col)
-        else:
-            gold_df = read_table(spark, gold_table)
-            if gold_df.limit(1).count() > 0:
-                gold_months = _distinct_month_nos(gold_df, month_col)
-    except Exception:
-        gold_months = []
-
-    batch_max = max(batch_months)
-    closed = sorted(m for m in gold_months if m < batch_max)
-    extra = parse_month_no_list(os.environ.get("MEDALLION_CURSOR_GOLD_CLOSED_MONTHS"))
-    if extra:
-        closed = sorted(set(closed) | set(extra))
-    return closed, batch_max
+    return excluded, batch_max
 
 
 def append_table(df: DataFrame, table_name: str) -> None:
