@@ -1,5 +1,16 @@
 # Cursor — daily E2E and month freeze
 
+## Variables (notebooks + env)
+
+| Name | Where | Daily | Month-close |
+|------|--------|-------|-------------|
+| `CURSOR_BRONZE_FILENAMES` | Silver `load_bronze_sources` | `[]` or new files | All files for that month |
+| `CURSOR_PROCESS_MONTH_NO` | Silver + both gold settings | `None` | `202610` (YYYYMM) |
+| `MEDALLION_CURSOR_PROCESS_MONTH_NO` | Env (optional) | unset | `202610` |
+| `Gold.ingest_freeze_control` | SQL | rows for closed months | INSERT **after** final gold run |
+| `MEDALLION_CURSOR_TABLE_SUFFIX` | Env before bootstrap | `_abdellah` or `""` | same |
+| `MEDALLION_CURSOR_AUTO_CLOSE_FROM_GOLD` | Env before bootstrap | `0` (default) | optional `1` |
+
 ## One-time: freeze control table
 
 Run in **AI_Medallion** lakehouse SQL (or Spark SQL):
