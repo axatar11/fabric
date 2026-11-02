@@ -52,7 +52,8 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`write_full_table(df, fqn)`** | Full **overwrite** silver tables (HC/Okta) via staging → deltalake. |
 | **`merge_incremental(spark, df, fqn, key)`** | Delta **merge** (cursor_usage silver, gold facts) from staging parquet chunks. |
 | **`append_table(df, fqn)`** | Append-only Delta write (e.g. cursor Okta join rejects). |
-| **`closed_month_nos_for_gold_merge(spark, gold_table, batch_df)`** | Auto-closed months = distinct `Month_No` already in gold and **&lt; max month in this batch**. |
+| **`read_cursor_frozen_month_nos(spark)`** | `Month_No` list from `Gold.ingest_freeze_control`. |
+| **`cursor_excluded_month_nos(spark, gold_table, batch_df)`** | Freeze control (+ optional auto-close if `MEDALLION_CURSOR_AUTO_CLOSE_FROM_GOLD=1`). |
 
 ---
 

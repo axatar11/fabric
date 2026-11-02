@@ -95,6 +95,15 @@ def exclude_month_nos(df: DataFrame, month_col: str, closed_month_nos: list[int]
     return df.filter(~F.col(month_col).isin(closed_month_nos))
 
 
+def filter_to_month_no(
+    df: DataFrame, month_col: str, month_no: int | None
+) -> DataFrame:
+    """Keep only rows for one YYYYMM (month-close scope)."""
+    if month_no is None:
+        return df
+    return df.filter(F.col(month_col).cast("int") == F.lit(int(month_no)))
+
+
 def join_hc_for_cursor_usage(
     joined: DataFrame, hc_slim: DataFrame, division_inc_default: str
 ) -> DataFrame:

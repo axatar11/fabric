@@ -88,6 +88,9 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         med,
         os.environ.get("ONELAKE_GOLD_FACT_COPILOT_ACTIVE", "Gold/fact_copilot_active"),
     )
+    mapping[config.TABLE_INGEST_FREEZE_CONTROL] = onelake_table_path(
+        med, "Gold/ingest_freeze_control"
+    )
     try:
         from Common import local_settings as ls  # type: ignore
 
@@ -974,6 +977,16 @@ def _deltalake_table_exists(path: str) -> bool:
         return False
 
 
+def parse_process_month_no(raw: str | int | None) -> int | None:
+    """Single YYYYMM for month-close runs (``MEDALLION_CURSOR_PROCESS_MONTH_NO``)."""
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    text = str(raw).strip()
+    return int(text) if text else None
+
+
 def parse_month_no_list(raw: str | list[int] | None) -> list[int]:
     """Parse ``202610,202611`` or a list of YYYYMM ints for closed-month filters."""
     if raw is None:
@@ -996,6 +1009,49 @@ def _distinct_month_nos(df: DataFrame, month_col: str) -> list[int]:
         .collect()
     )
     return sorted(int(r["_m"]) for r in rows)
+
+
+def read_cursor_frozen_month_nos(spark: SparkSession) -> list[int]:
+    """``Month_No`` values from ``ingest_freeze_control`` for ``cursor`` or ``all``."""
+    from Common import config
+    from pyspark.sql import functions as F
+
+    try:
+        df = read_table(spark, config.TABLE_INGEST_FREEZE_CONTROL)
+    except Exception:
+        return []
+    if df.limit(1).count() == 0:
+        return []
+    rows = (
+        df.filter(F.lower(F.col("product")).isin("cursor", "all"))
+        .select(F.col("Month_No").cast("int").alias("_m"))
+        .where(F.col("_m").isNotNull())
+        .distinct()
+        .collect()
+    )
+    return sorted(int(r["_m"]) for r in rows)
+
+
+def cursor_excluded_month_nos(
+    spark: SparkSession,
+    gold_table: str,
+    batch_df: DataFrame,
+    month_col: str = "Month_No",
+) -> tuple[list[int], int | None]:
+    """Months to skip on silver/gold merge: freeze control (+ optional auto-close from gold)."""
+    excluded = set(read_cursor_frozen_month_nos(spark))
+    batch_months = _distinct_month_nos(batch_df, month_col)
+    batch_max = max(batch_months) if batch_months else None
+    if os.environ.get("MEDALLION_CURSOR_AUTO_CLOSE_FROM_GOLD", "0").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        auto, batch_max = closed_month_nos_for_gold_merge(
+            spark, gold_table, batch_df, month_col
+        )
+        excluded.update(auto)
+    return sorted(excluded), batch_max
 
 
 def closed_month_nos_for_gold_merge(
