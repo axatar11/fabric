@@ -977,6 +977,16 @@ def _deltalake_table_exists(path: str) -> bool:
         return False
 
 
+def parse_process_month_no(raw: str | int | None) -> int | None:
+    """Single YYYYMM for month-close runs (``MEDALLION_CURSOR_PROCESS_MONTH_NO``)."""
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    text = str(raw).strip()
+    return int(text) if text else None
+
+
 def parse_month_no_list(raw: str | list[int] | None) -> list[int]:
     """Parse ``202610,202611`` or a list of YYYYMM ints for closed-month filters."""
     if raw is None:

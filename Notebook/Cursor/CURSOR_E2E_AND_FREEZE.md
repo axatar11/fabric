@@ -17,14 +17,32 @@ Run in **AI_Medallion** lakehouse SQL (or Spark SQL):
 
 Sandbox tables default suffix `_abdellah` (`MEDALLION_CURSOR_TABLE_SUFFIX`).
 
-## Freeze a month
+## Month-close (one last full recompute, then freeze)
+
+Set **the same** month on all Cursor notebooks (or env once before bootstrap):
+
+```python
+CURSOR_PROCESS_MONTH_NO = 202610
+# or: os.environ["MEDALLION_CURSOR_PROCESS_MONTH_NO"] = "202610"
+```
+
+| Layer | Scope when set |
+|-------|----------------|
+| Bronze | `Date` in that calendar month |
+| HC join | `HCMonthNo` = that month only |
+| Silver usage | `CursorUsageMonthNo` = that month |
+| Gold | Reads/filters silver to that month only |
+
+Okta stays **full current** (needed to match users on that month’s events).
+
+Order: HC silver for that month → Cursor silver → both gold → then:
 
 ```sql
 INSERT INTO Gold.ingest_freeze_control VALUES
-  ('cursor', 202609, current_timestamp(), 'you@domain.com', 'Sep 2026 close');
+  ('cursor', 202610, current_timestamp(), 'you@domain.com', 'Oct 2026 close');
 ```
 
-Next daily runs skip **202609** on silver and both gold merges.
+Daily runs: leave `CURSOR_PROCESS_MONTH_NO` **unset** — only non-frozen months process.
 
 ## Optional: auto-close older months already in gold
 
