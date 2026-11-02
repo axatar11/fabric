@@ -308,6 +308,8 @@ def _notebook_reload_io_helpers(
     ng["merge_incremental"] = io.merge_incremental
     ng["parse_month_no_list"] = io.parse_month_no_list
     ng["closed_month_nos_for_gold_merge"] = io.closed_month_nos_for_gold_merge
+    ng["read_cursor_frozen_month_nos"] = io.read_cursor_frozen_month_nos
+    ng["cursor_excluded_month_nos"] = io.cursor_excluded_month_nos
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
     ng["exclude_month_nos"] = transforms.exclude_month_nos
     ng["save_table_cache"] = io.save_table_cache
@@ -363,6 +365,8 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "merge_incremental": io.merge_incremental,
             "parse_month_no_list": io.parse_month_no_list,
             "closed_month_nos_for_gold_merge": io.closed_month_nos_for_gold_merge,
+            "read_cursor_frozen_month_nos": io.read_cursor_frozen_month_nos,
+            "cursor_excluded_month_nos": io.cursor_excluded_month_nos,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
             "break_lineage_local": _bind_break_lineage_local(spark),
             "publish_merge_staging": io.publish_merge_staging,
