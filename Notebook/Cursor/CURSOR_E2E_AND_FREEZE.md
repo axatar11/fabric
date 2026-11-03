@@ -10,7 +10,7 @@ CURSOR_CLOSE_MONTH_NO = None      # daily
 | Value | Behavior |
 |-------|----------|
 | **`None`** | Daily: process bronze/silver/gold for **non-frozen** months only (`Gold.ingest_freeze_control`). HC silver keeps frozen months. |
-| **`202610`** | Month-close: **October 2026 only** (HC, cursor bronze/silver, both gold). **Okta:** `updated_at` strictly before 1 Nov 2026. **Freeze:** after `NB_CursorOnboard_Gold`. |
+| **`202610`** | Month-close: **October 2026 only** (HC `Month_No`, cursor usage dates, gold `LastModification` / `CursorUsageDate` before 1 Nov 2026). **Okta:** `updated_at` before 1 Nov 2026. Silver/gold **replace** that month in target (not merge-only). **Freeze:** after `NB_CursorOnboard_Gold`. |
 
 Same line in:
 
