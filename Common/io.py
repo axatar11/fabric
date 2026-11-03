@@ -719,18 +719,29 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
             elif backend == "deltalake":
                 df = _read_delta_via_deltalake(spark, path)
             else:
-                cache_dir = None
-                if _local_table_cache_enabled() and not _skip_auto_cache_on_read():
-                    cache_dir = local_cache_path(table_fqn)
+                # Scan backend: always stream OneLake -> local parquet, then open cache.
+                # Avoids holding 400k+ rows in a Spark plan when MEDALLION_LOCAL_TABLE_CACHE=0
+                # (use MEDALLION_CACHE_REFRESH=1 for a fresh OneLake pull instead of disabling cache).
+                cache_dir = local_cache_path(table_fqn)
+                need_scan = (
+                    _local_cache_refresh()
+                    or not _local_table_cache_enabled()
+                    or not cache_file_exists(cache_dir)
+                )
+                if need_scan:
                     if _local_cache_refresh() and cache_dir.exists():
                         shutil.rmtree(cache_dir, ignore_errors=True)
+                    _read_delta_via_deltalake_scan(
+                        spark, path, cache_dir=cache_dir, table_fqn=table_fqn
+                    )
+                if cache_file_exists(cache_dir):
+                    return _read_parquet_cache_dir(spark, cache_dir, table_fqn)
                 df = _read_delta_via_deltalake_scan(
-                    spark, path, cache_dir=cache_dir, table_fqn=table_fqn
+                    spark, path, cache_dir=None, table_fqn=table_fqn
                 )
-                if cache_dir is None or not cache_file_exists(cache_dir):
-                    if not _skip_auto_cache_on_read():
-                        _write_local_cache(df, table_fqn)
-            return df
+                if not _skip_auto_cache_on_read():
+                    _write_local_cache(df, table_fqn)
+                return df
     return spark.table(table_fqn)
 
 
@@ -856,21 +867,10 @@ def read_table_broken_lineage(
         _read_progress(f"read_table_broken_lineage: cache hit ({label})")
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
 
-    # Scan -> pyarrow cache (no Spark shuffle). Must run on refresh too — otherwise we
-    # fall through to break_lineage_local on ~400k+ rows and Windows Python workers crash.
-    if scan_backend and _local_table_cache_enabled():
-        if _local_cache_refresh() and cache_path.exists():
-            shutil.rmtree(cache_path, ignore_errors=True)
-        _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
-        _read_delta_via_deltalake_scan(
-            spark, lake_path, cache_dir=cache_path, table_fqn=table_fqn
-        )
-        if cache_file_exists(cache_path):
-            _read_progress(f"read_table_broken_lineage: opened cache after scan ({label})")
-            return _read_parquet_cache_dir(spark, cache_path, table_fqn)
-        raise RuntimeError(
-            f"read_table_broken_lineage: scan finished but cache missing for {table_fqn} at {cache_path}"
-        )
+    if scan_backend:
+        df = read_table(spark, table_fqn)
+        _read_progress(f"read_table_broken_lineage: {label} via read_table (scan cache)")
+        return df
 
     df = read_table(spark, table_fqn)
     if _local_table_cache_enabled() and cache_file_exists(cache_path):
@@ -878,18 +878,22 @@ def read_table_broken_lineage(
             f"read_table_broken_lineage: re-open cache after read_table ({label})"
         )
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
-    if scan_backend:
-        _read_progress(
-            f"read_table_broken_lineage: {label} — scan DataFrame in-process "
-            "(MEDALLION_LOCAL_TABLE_CACHE=0; no break_lineage)"
-        )
-        return df
     return break_lineage_local(spark, df, label)
 
 
 def break_lineage_local(spark: SparkSession, df: DataFrame, label: str) -> DataFrame:
     """Write/read local parquet so later joins are not stuck on an old broadcast plan."""
     apply_local_merge_spark_conf(spark)
+    max_driver_rows = int(os.environ.get("MEDALLION_BREAK_LINEAGE_DRIVER_ROWS", "10000"))
+    try:
+        if df.limit(max_driver_rows + 1).count() <= max_driver_rows:
+            pdf = df.toPandas()
+            _read_progress(
+                f"break_lineage_local: {label} — driver materialize ({len(pdf)} rows)"
+            )
+            return spark.createDataFrame(pdf, schema=df.schema)
+    except Exception as exc:
+        _read_debug(f"break_lineage_local: driver materialize skipped ({exc!s})")
     path = Path.home() / ".fabric" / "merge_staging" / "_break" / label
     _read_progress(f"break_lineage_local: {label} -> {path}")
     _write_df_to_local_parquet(df, path, staging=True)
