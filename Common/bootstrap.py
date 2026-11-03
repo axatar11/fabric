@@ -457,7 +457,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         if io._local_table_cache_enabled():
             print(
                 "Local table cache ON (default): parquet under ~/.fabric/medallion_cache/. "
-                "Set MEDALLION_CACHE_REFRESH=1 to force OneLake. reload_io_helpers(globals()) "
+                "Set REBUILD_MEDALLION_CACHE = True in settings to force OneLake. reload_io_helpers(globals()) "
                 "after git pull — no kernel restart."
             )
         if io._use_deltalake_onelake_write():

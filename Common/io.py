@@ -519,7 +519,10 @@ def _local_cache_refresh() -> bool:
 
 
 def sync_rebuild_medallion_cache_env(rebuild: bool) -> None:
-    """Notebook helper: sets ``MEDALLION_CACHE_REFRESH=1`` when rebuild is True."""
+    """Notebook knob: True = scan OneLake and refresh local cache; False = use cache."""
+    os.environ["MEDALLION_LOCAL_TABLE_CACHE"] = "1"
+    os.environ["MEDALLION_SCAN_RETRIES"] = "1"
+    os.environ["MEDALLION_SCAN_TRANSPORT_RETRIES"] = "1"
     if rebuild:
         os.environ["MEDALLION_CACHE_REFRESH"] = "1"
     else:
