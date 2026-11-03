@@ -996,6 +996,31 @@ def cursor_close_month_no() -> int | None:
     return parse_process_month_no(raw or None)
 
 
+def replace_months_in_frame(
+    spark: SparkSession,
+    table_name: str,
+    month_df: DataFrame,
+    month_col: str,
+    month_nos: list[int],
+) -> DataFrame:
+    """Keep other months in target; replace listed ``month_nos`` with ``month_df`` (may be empty)."""
+    from pyspark.sql import functions as F
+
+    if not month_nos:
+        return month_df
+    month_set = [int(m) for m in month_nos]
+    try:
+        existing = read_table(spark, table_name)
+        if existing.limit(1).count() > 0:
+            kept = existing.filter(~F.col(month_col).cast("int").isin(month_set))
+            if month_df.limit(1).count() > 0:
+                return kept.unionByName(month_df, allowMissingColumns=True)
+            return kept
+    except Exception:
+        pass
+    return month_df
+
+
 def replace_one_month_in_frame(
     spark: SparkSession,
     table_name: str,
@@ -1004,18 +1029,26 @@ def replace_one_month_in_frame(
     month_no: int,
 ) -> DataFrame:
     """Keep other months from target table; replace rows for ``month_no`` with ``month_df``."""
-    from pyspark.sql import functions as F
+    return replace_months_in_frame(spark, table_name, month_df, month_col, [int(month_no)])
 
-    try:
-        existing = read_table(spark, table_name)
-        if existing.limit(1).count() > 0:
-            kept = existing.filter(F.col(month_col).cast("int") != F.lit(int(month_no)))
-            if month_df.limit(1).count() > 0:
-                return kept.unionByName(month_df, allowMissingColumns=True)
-            return kept
-    except Exception:
-        pass
-    return month_df
+
+def write_cursor_okta_rejects(
+    spark: SparkSession,
+    rejects_df: DataFrame,
+    processed_month_nos: list[int],
+    *,
+    table_name: str | None = None,
+) -> None:
+    """Replace reject rows for months in this batch; frozen months never appear in ``processed_month_nos``."""
+    from Common import config
+
+    if not processed_month_nos:
+        return
+    target = table_name or config.TABLE_CURSOR_OKTA_REJECT
+    out = replace_months_in_frame(
+        spark, target, rejects_df, "CursorUsageMonthNo", processed_month_nos
+    )
+    write_full_table(out, target)
 
 
 def append_cursor_freeze_month(

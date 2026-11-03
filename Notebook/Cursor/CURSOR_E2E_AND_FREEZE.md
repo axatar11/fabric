@@ -42,4 +42,4 @@ Same line in:
 | `okta_user_for_ai` | `fact_cursor_active` |
 | `hc_silver_historical` | `fact_cursor_onboard` |
 | `cursor_usage` | |
-| `cursor_usage_okta_reject` | |
+| `cursor_usage_okta_reject` | Rebuilt per run for months in the batch (frozen months untouched). |
