@@ -13,47 +13,6 @@ if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
 
-def spark_is_alive(spark: SparkSession | None) -> bool:
-    """True when the JVM accepts a trivial job (Py4J gateway up)."""
-    if spark is None:
-        return False
-    try:
-        if spark.sparkContext._jsc.sc().isStopped():  # type: ignore[union-attr]
-            return False
-        spark.range(1).count()
-        return True
-    except Exception:
-        return False
-
-
-def resolve_spark_session(
-    df: DataFrame | None = None,
-    spark: SparkSession | None = None,
-) -> SparkSession:
-    """Pick a live Spark session for writes (prefer explicit notebook ``spark``)."""
-    from pyspark.sql import SparkSession
-
-    candidates: list[SparkSession] = []
-    for s in (spark, SparkSession.getActiveSession(), df.sparkSession if df is not None else None):
-        if s is not None and s not in candidates:
-            candidates.append(s)
-    for s in candidates:
-        if spark_is_alive(s):
-            return s
-    raise RuntimeError(
-        "Spark JVM is not running. Restart the kernel, then run settings → bootstrap → "
-        "read → transform → write in order (do not run the write cell by itself)."
-    )
-
-
-def _assert_df_spark_session(df: DataFrame, spark: SparkSession) -> None:
-    if df.sparkSession is not spark:
-        raise RuntimeError(
-            "This DataFrame was built on a different or stale Spark session. "
-            "Re-run bootstrap and the transform cell, then write again."
-        )
-
-
 def onelake_table_path(lakehouse_id: str, *subpath: str) -> str:
     """Build ``abfss://{workspace}@onelake…/{lakehouse}/Tables/…`` path."""
     suffix = ".Lakehouse" if os.environ.get("ONELAKE_LAKEHOUSE_SUFFIX", "").lower() in (
@@ -842,15 +801,10 @@ def _df_for_staging_write(df: DataFrame) -> DataFrame:
     return df.repartition(parts) if parts > 1 else df.coalesce(1)
 
 
-def apply_local_merge_spark_conf(
-    spark: SparkSession | None = None,
-    *,
-    df: DataFrame | None = None,
-) -> SparkSession:
+def apply_local_merge_spark_conf(spark: SparkSession) -> None:
     """Call before building write_df locally — avoids broadcast joins that crash Python workers."""
-    spark = resolve_spark_session(df, spark)
     if not _use_path_reads():
-        return spark
+        return
     spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "-1")
     spark.conf.set("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
     spark.conf.set("spark.sql.adaptive.enabled", "false")
@@ -859,7 +813,6 @@ def apply_local_merge_spark_conf(
     spark.conf.set("spark.sql.execution.arrow.pyspark.fallback.enabled", "false")
     parts = os.environ.get("MEDALLION_MERGE_SHUFFLE_PARTITIONS", "4")
     spark.conf.set("spark.sql.shuffle.partitions", parts)
-    return spark
 
 
 def _local_checkpoint_dir() -> Path:
@@ -946,14 +899,9 @@ def break_lineage_local(spark: SparkSession, df: DataFrame, label: str) -> DataF
     return spark.read.parquet(str(path))
 
 
-def publish_merge_staging(
-    df: DataFrame,
-    table_fqn: str,
-    spark: SparkSession | None = None,
-) -> Path:
+def publish_merge_staging(df: DataFrame, table_fqn: str) -> Path:
     """Call at end of transform — merge_incremental reads this (no Spark collect on join plan)."""
-    spark = apply_local_merge_spark_conf(spark, df=df)
-    _assert_df_spark_session(df, spark)
+    apply_local_merge_spark_conf(df.sparkSession)
     path = merge_staging_path(table_fqn)
     _read_progress(f"publish_merge_staging: {table_fqn} -> {path}")
     _write_df_to_local_parquet(df, path, staging=True)
@@ -1091,7 +1039,7 @@ def write_cursor_okta_rejects(
     *,
     table_name: str | None = None,
 ) -> None:
-    """Replace reject rows for months in this batch; frozen months never appear in ``processed_month_nos``."""
+    """Replace reject rows for months in this batch; frozen months never in ``processed_month_nos``."""
     from Common import config
 
     if not processed_month_nos:
@@ -1201,20 +1149,15 @@ def cursor_excluded_month_nos(
     return excluded, batch_max
 
 
-def append_table(
-    df: DataFrame,
-    table_name: str,
-    spark: SparkSession | None = None,
-) -> None:
+def append_table(df: DataFrame, table_name: str) -> None:
     """Append rows to a Delta table (creates the table if it does not exist)."""
     path = _onelake_delta_path(table_name)
     staging = merge_staging_path(table_name)
     if path and _use_deltalake_onelake_write():
-        spark = apply_local_merge_spark_conf(spark, df=df)
-        _assert_df_spark_session(df, spark)
+        apply_local_merge_spark_conf(df.sparkSession)
         safe = table_name.replace(".", "__")
-        df = break_lineage_local(spark, df, f"append_break_{safe}")
-        publish_merge_staging(df, table_name, spark=spark)
+        df = break_lineage_local(df.sparkSession, df, f"append_break_{safe}")
+        publish_merge_staging(df, table_name)
         if not staging.is_dir() or not any(staging.glob("*.parquet")):
             raise RuntimeError(
                 f"No merge staging parquet at {staging}. "
@@ -1225,32 +1168,25 @@ def append_table(
             staging, path, mode="append" if exists else "overwrite"
         )
         return
-    spark = resolve_spark_session(df, spark)
-    _assert_df_spark_session(df, spark)
     writer = df.write.format("delta").mode("append")
     if path:
         from Common.fabric_storage import apply_azure_cli_abfs_conf
 
-        apply_azure_cli_abfs_conf(spark)
+        apply_azure_cli_abfs_conf(df.sparkSession)
         _read_debug(f"append_table: pyspark save {path}")
         writer.save(path)
         return
     writer.saveAsTable(table_name)
 
 
-def write_full_table(
-    df: DataFrame | None,
-    table_name: str,
-    spark: SparkSession | None = None,
-) -> None:
+def write_full_table(df: DataFrame | None, table_name: str) -> None:
     """Overwrite a Delta table (full load). Local: staging parquet → deltalake OneLake."""
     path = _onelake_delta_path(table_name)
     staging = merge_staging_path(table_name)
     if path and _use_deltalake_onelake_write():
         if df is not None:
-            spark = apply_local_merge_spark_conf(spark, df=df)
-            _assert_df_spark_session(df, spark)
-            publish_merge_staging(df, table_name, spark=spark)
+            apply_local_merge_spark_conf(df.sparkSession)
+            publish_merge_staging(df, table_name)
         if not staging.is_dir() or not any(staging.glob("*.parquet")):
             raise RuntimeError(
                 f"No merge staging parquet at {staging}. "
@@ -1263,13 +1199,11 @@ def write_full_table(
         raise RuntimeError(
             f"write_full_table({table_name!r}): DataFrame required for non-deltalake write"
         )
-    spark = resolve_spark_session(df, spark)
-    _assert_df_spark_session(df, spark)
     writer = df.write.format("delta").mode("overwrite").option("overwriteSchema", "true")
     if path:
         from Common.fabric_storage import apply_azure_cli_abfs_conf
 
-        apply_azure_cli_abfs_conf(spark)
+        apply_azure_cli_abfs_conf(df.sparkSession)
         _read_debug(f"write_full_table: pyspark save {path}")
         writer.save(path)
         return
