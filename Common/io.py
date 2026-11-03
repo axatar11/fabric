@@ -1061,26 +1061,57 @@ def append_cursor_freeze_month(
     """Append ``ingest_freeze_control`` row for Cursor (skip if already frozen)."""
     from datetime import datetime, timezone
 
-    from pyspark.sql import Row
+    import pandas as pd
+    from deltalake import write_deltalake
 
     from Common import config
+    from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
     if month_no in read_cursor_frozen_month_nos(spark):
         _read_progress(f"freeze: Month_No {month_no} already in ingest_freeze_control — skip")
         return
     ts = datetime.now(timezone.utc)
-    df = spark.createDataFrame(
+    pdf = pd.DataFrame(
         [
-            Row(
-                product="cursor",
-                Month_No=int(month_no),
-                frozen_at=ts,
-                frozen_by=frozen_by,
-                notes=notes,
-            )
+            {
+                "product": "cursor",
+                "Month_No": int(month_no),
+                "frozen_at": ts,
+                "frozen_by": frozen_by,
+                "notes": notes,
+            }
         ]
     )
-    append_table(df, config.TABLE_INGEST_FREEZE_CONTROL)
+    path = _onelake_delta_path(config.TABLE_INGEST_FREEZE_CONTROL)
+    if path and _use_deltalake_onelake_write():
+        refresh_abfs_token_env()
+        opts = fabric_storage_options()
+        exists = _deltalake_table_exists(path)
+        _read_progress(
+            f"freeze: deltalake append Month_No {month_no} "
+            f"({'append' if exists else 'create'})"
+        )
+        write_deltalake(
+            path,
+            pdf,
+            mode="append" if exists else "overwrite",
+            storage_options=opts,
+        )
+    else:
+        from pyspark.sql import Row
+
+        df = spark.createDataFrame(
+            [
+                Row(
+                    product="cursor",
+                    Month_No=int(month_no),
+                    frozen_at=ts,
+                    frozen_by=frozen_by,
+                    notes=notes,
+                )
+            ]
+        )
+        append_table(df, config.TABLE_INGEST_FREEZE_CONTROL)
     _read_progress(f"freeze: appended Month_No {month_no} to ingest_freeze_control")
 
 
