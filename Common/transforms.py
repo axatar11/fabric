@@ -104,6 +104,18 @@ def filter_to_month_no(
     return df.filter(F.col(month_col).cast("int") == F.lit(int(month_no)))
 
 
+def filter_through_close_month_ts(
+    df: DataFrame, ts_col: str, month_no: int | None
+) -> DataFrame:
+    """Month-close: keep rows with ``ts_col`` before the first day after ``month_no`` (YYYYMM)."""
+    if month_no is None:
+        return df
+    y, m = divmod(int(month_no), 100)
+    ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+    bound = F.to_timestamp(F.make_date(F.lit(ny), F.lit(nm), F.lit(1)))
+    return df.filter(F.col(ts_col).cast("timestamp") < bound)
+
+
 def join_hc_for_cursor_usage(
     joined: DataFrame, hc_slim: DataFrame, division_inc_default: str
 ) -> DataFrame:
