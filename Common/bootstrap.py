@@ -317,6 +317,7 @@ def _notebook_reload_io_helpers(
     ng["replace_one_month_in_frame"] = io.replace_one_month_in_frame
     ng["replace_months_in_frame"] = io.replace_months_in_frame
     ng["write_cursor_okta_rejects"] = io.write_cursor_okta_rejects
+    ng["write_cursor_silver_daily"] = io.write_cursor_silver_daily
     ng["_distinct_month_nos"] = io._distinct_month_nos
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
     ng["exclude_month_nos"] = transforms.exclude_month_nos
@@ -382,6 +383,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "replace_one_month_in_frame": io.replace_one_month_in_frame,
             "replace_months_in_frame": io.replace_months_in_frame,
             "write_cursor_okta_rejects": io.write_cursor_okta_rejects,
+            "write_cursor_silver_daily": io.write_cursor_silver_daily,
             "_distinct_month_nos": io._distinct_month_nos,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
             "break_lineage_local": _bind_break_lineage_local(spark),

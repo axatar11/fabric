@@ -9,7 +9,7 @@ CURSOR_CLOSE_MONTH_NO = None      # daily
 
 | Value | Behavior |
 |-------|----------|
-| **`None`** | Daily: process bronze/silver/gold for **non-frozen** months only (`Gold.ingest_freeze_control`). HC silver keeps frozen months. |
+| **`None`** | Daily: reload **open** months from bronze; **frozen** months stay in silver (not re-read from bronze). HC silver same idea. |
 | **`202610`** | Month-close: **October 2026 only** (HC `Month_No`, cursor usage dates, gold `LastModification` / `CursorUsageDate` before 1 Nov 2026). **Okta:** `updated_at` before 1 Nov 2026. Silver/gold **replace** that month in target (not merge-only). **Freeze:** after `NB_CursorOnboard_Gold`. |
 
 Same line in:
@@ -34,6 +34,8 @@ Same line in:
 ## Daily run
 
 **`CURSOR_CLOSE_MONTH_NO = None`** everywhere. Run pipeline as usual.
+
+**First time a month must land in silver** (e.g. Oct in bronze but not in silver yet): run **month-close** once with **`CURSOR_CLOSE_MONTH_NO = 202610`**, then add freeze. Freeze alone does not load that month from bronze on daily.
 
 ## Tables
 
