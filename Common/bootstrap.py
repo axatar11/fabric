@@ -312,6 +312,7 @@ def _notebook_reload_io_helpers(
     ng["cursor_frozen_month_nos_to_skip"] = io.cursor_frozen_month_nos_to_skip
     ng["cursor_excluded_month_nos"] = io.cursor_excluded_month_nos
     ng["sync_cursor_close_month_env"] = io.sync_cursor_close_month_env
+    ng["sync_rebuild_medallion_cache_env"] = io.sync_rebuild_medallion_cache_env
     ng["append_cursor_freeze_month"] = io.append_cursor_freeze_month
     ng["replace_one_month_in_frame"] = io.replace_one_month_in_frame
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
@@ -373,6 +374,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "cursor_frozen_month_nos_to_skip": io.cursor_frozen_month_nos_to_skip,
             "cursor_excluded_month_nos": io.cursor_excluded_month_nos,
             "sync_cursor_close_month_env": io.sync_cursor_close_month_env,
+            "sync_rebuild_medallion_cache_env": io.sync_rebuild_medallion_cache_env,
             "append_cursor_freeze_month": io.append_cursor_freeze_month,
             "replace_one_month_in_frame": io.replace_one_month_in_frame,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
