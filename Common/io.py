@@ -408,7 +408,7 @@ def _read_delta_via_deltalake_scan(
     from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
     max_retries = max(1, int(os.environ.get("MEDALLION_SCAN_RETRIES", "6")))
-    max_transport = max(1, int(os.environ.get("MEDALLION_SCAN_TRANSPORT_RETRIES", "2")))
+    max_transport = max(1, int(os.environ.get("MEDALLION_SCAN_TRANSPORT_RETRIES", "6")))
     transport_failures = 0
     last_error: BaseException | None = None
     for attempt in range(1, max_retries + 1):
@@ -452,6 +452,8 @@ def _read_delta_via_deltalake_scan(
             if _scan_error_is_transport(exc):
                 transport_failures += 1
                 if transport_failures >= max_transport:
+                    if cache_dir is not None and cache_dir.exists():
+                        shutil.rmtree(cache_dir, ignore_errors=True)
                     raise RuntimeError(
                         "OneLake parquet download failed mid-stream (HTTP body/connect error). "
                         "This is not an expired token — az login refresh will not fix it.\n"
@@ -461,7 +463,8 @@ def _read_delta_via_deltalake_scan(
                         f"{Path.home() / '.fabric' / 'medallion_cache'} (cache hit = no OneLake).\n"
                         "  2) Seed cache from Fabric: run Spark read in Fabric, write parquet, copy to medallion_cache.\n"
                         "  3) Tomorrow: Azure SDK per-file download or PySpark cache-fill (column mapping).\n"
-                        "Stopgap: MEDALLION_OBJECT_STORE_CONCURRENCY=1, avoid MEDALLION_CACHE_REFRESH=1."
+                        "Stopgap: MEDALLION_LOCAL_TABLE_CACHE=1, avoid MEDALLION_CACHE_REFRESH=1, "
+                        "MEDALLION_OBJECT_STORE_CONCURRENCY=1."
                     ) from exc
                 wait = min(5 * transport_failures, 20)
                 _read_progress(
