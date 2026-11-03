@@ -1080,15 +1080,33 @@ def read_cursor_frozen_month_nos(spark: SparkSession) -> list[int]:
     return sorted(int(r["_m"]) for r in rows)
 
 
+def cursor_frozen_month_nos_to_skip(
+    spark: SparkSession,
+    close_month_no: int | None = None,
+) -> list[int]:
+    """Frozen months to exclude from daily merge/write.
+
+    When ``close_month_no`` is set (month-close), that month may still be reloaded even if
+    already listed in ``ingest_freeze_control``.
+    """
+    frozen = read_cursor_frozen_month_nos(spark)
+    if close_month_no is not None:
+        close = int(close_month_no)
+        frozen = [m for m in frozen if m != close]
+    return frozen
+
+
 def cursor_excluded_month_nos(
     spark: SparkSession,
     gold_table: str,
     batch_df: DataFrame,
     month_col: str = "Month_No",
+    *,
+    close_month_no: int | None = None,
 ) -> tuple[list[int], int | None]:
-    """Months to skip on gold merge: ``ingest_freeze_control`` for cursor (``gold_table`` unused)."""
+    """Months to skip on gold merge: freeze control (``gold_table`` unused)."""
     _ = gold_table
-    excluded = read_cursor_frozen_month_nos(spark)
+    excluded = cursor_frozen_month_nos_to_skip(spark, close_month_no)
     batch_months = _distinct_month_nos(batch_df, month_col)
     batch_max = max(batch_months) if batch_months else None
     return excluded, batch_max
