@@ -51,7 +51,8 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`publish_merge_staging(df, fqn)`** | Write transform result to `merge_staging/` for merge/overwrite. |
 | **`write_full_table(df, fqn)`** | Full **overwrite** silver tables (HC/Okta) via staging → deltalake. |
 | **`merge_incremental(spark, df, fqn, key)`** | Delta **merge** (cursor_usage silver, gold facts) from staging parquet chunks. |
-| **`append_table(df, fqn)`** | Append-only Delta write (e.g. cursor Okta join rejects). |
+| **`append_table(df, fqn)`** | Append-only Delta write. |
+| **`write_cursor_okta_rejects(spark, df, month_nos)`** | Replace `cursor_usage_okta_reject` rows for processed months (same scope as cursor silver batch). |
 | **`read_cursor_frozen_month_nos(spark)`** | `Month_No` list from `Gold.ingest_freeze_control`. |
 | **`sync_cursor_close_month_env(month_no)`** | Notebook helper: set `MEDALLION_CURSOR_CLOSE_MONTH_NO` before bootstrap. |
 | **`cursor_frozen_month_nos_to_skip(spark, close_month_no)`** | Frozen months to skip on daily; month-close may reload `close_month_no`. |

@@ -191,7 +191,7 @@ def _get_spark(notebook_globals: dict[str, Any], app_name: str):
     existing = notebook_globals.get("spark")
     if existing is not None and os.environ.get("MEDALLION_FRESH_SPARK") != "1":
         try:
-            existing.sparkContext
+            existing.range(1).count()
             if io._use_path_reads():
                 fabric_storage.apply_azure_cli_abfs_conf(existing)
             return existing, {"runtime": _runtime(), "mode": "attached"}
@@ -315,6 +315,9 @@ def _notebook_reload_io_helpers(
     ng["sync_rebuild_medallion_cache_env"] = io.sync_rebuild_medallion_cache_env
     ng["append_cursor_freeze_month"] = io.append_cursor_freeze_month
     ng["replace_one_month_in_frame"] = io.replace_one_month_in_frame
+    ng["replace_months_in_frame"] = io.replace_months_in_frame
+    ng["write_cursor_okta_rejects"] = io.write_cursor_okta_rejects
+    ng["_distinct_month_nos"] = io._distinct_month_nos
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
     ng["exclude_month_nos"] = transforms.exclude_month_nos
     ng["save_table_cache"] = io.save_table_cache
@@ -377,6 +380,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "sync_rebuild_medallion_cache_env": io.sync_rebuild_medallion_cache_env,
             "append_cursor_freeze_month": io.append_cursor_freeze_month,
             "replace_one_month_in_frame": io.replace_one_month_in_frame,
+            "replace_months_in_frame": io.replace_months_in_frame,
+            "write_cursor_okta_rejects": io.write_cursor_okta_rejects,
+            "_distinct_month_nos": io._distinct_month_nos,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
             "break_lineage_local": _bind_break_lineage_local(spark),
             "publish_merge_staging": io.publish_merge_staging,
