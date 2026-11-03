@@ -1210,6 +1210,37 @@ def write_full_table(df: DataFrame | None, table_name: str) -> None:
     writer.saveAsTable(table_name)
 
 
+def write_cursor_silver_daily(
+    spark: SparkSession,
+    write_df: DataFrame,
+    table_name: str,
+    merge_key: str,
+    *,
+    close_month_no: int | None = None,
+) -> None:
+    """Daily cursor silver: merge when nothing frozen; else keep frozen months from target (like HC)."""
+    from pyspark.sql import functions as F
+
+    frozen = cursor_frozen_month_nos_to_skip(spark, close_month_no)
+    if not frozen:
+        merge_incremental(spark, write_df, table_name, merge_key)
+        return
+    month_col = "CursorUsageMonthNo"
+    out = write_df
+    try:
+        existing = read_table(spark, table_name)
+        if existing.limit(1).count() > 0:
+            kept = existing.filter(F.col(month_col).cast("int").isin([int(m) for m in frozen]))
+            if out.limit(1).count() > 0:
+                out = kept.unionByName(out, allowMissingColumns=True)
+            else:
+                out = kept
+    except Exception:
+        pass
+    _read_progress(f"cursor silver daily: preserved frozen Month_No {frozen}")
+    write_full_table(out, table_name)
+
+
 def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> None:
     """Upsert via Delta merge on ``merge_key``. Expects ``publish_merge_staging`` output locally."""
     path = _onelake_delta_path(table_name)
