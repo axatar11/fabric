@@ -334,9 +334,12 @@ def _scan_batches_to_spark(
     spark_schema: "StructType",
     *,
     cache_dir: Path | None = None,
+    wipe_cache: bool = True,
 ) -> tuple[DataFrame, int]:
     """Stream deltalake scan batches into Spark (chunked to limit RAM on large tables)."""
     row_count = 0
+    rows_committed = 0
+    skip_rows = 0
     next_progress = 50_000
     chunk_limit = max(10_000, int(os.environ.get("MEDALLION_SCAN_CHUNK_ROWS", "75000")))
     pending: list = []
@@ -345,22 +348,38 @@ def _scan_batches_to_spark(
     cache_part = 0
     if cache_dir is not None:
         cache_dir.parent.mkdir(parents=True, exist_ok=True)
-        if cache_dir.exists():
-            shutil.rmtree(cache_dir, ignore_errors=True)
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        if wipe_cache:
+            _clear_scan_cache_dir(cache_dir)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        elif not cache_dir.is_dir():
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        if wipe_cache or not _scan_rows_committed_path(cache_dir).is_file():
+            skip_rows = 0
+            cache_part = len(list(cache_dir.glob("part-*.parquet")))
+        else:
+            skip_rows = _read_scan_rows_committed(cache_dir)
+            cache_part = len(list(cache_dir.glob("part-*.parquet")))
+            if skip_rows > 0:
+                _read_progress(
+                    f"read_table: resume OneLake scan from row {skip_rows:,} "
+                    f"({cache_part} parquet part(s) already on disk)"
+                )
         _write_local_cache_schema(cache_dir, spark_schema)
 
     cache_only = cache_dir is not None
 
     def flush_chunk() -> None:
-        nonlocal spark_df, pending, pending_rows, cache_part
+        nonlocal spark_df, pending, pending_rows, cache_part, rows_committed
         if not pending:
             return
         pdf = _pandas_for_spark_schema(_batches_to_pandas(pending), spark_schema)
+        chunk_rows = len(pdf)
         if cache_dir is not None:
             part_path = cache_dir / f"part-{cache_part:05d}.parquet"
             _write_parquet_with_spark_schema(pdf, spark_schema, part_path)
             cache_part += 1
+            rows_committed += chunk_rows
+            _write_scan_rows_committed(cache_dir, rows_committed)
         if not cache_only:
             part = spark.createDataFrame(pdf, schema=spark_schema)
             spark_df = (
@@ -372,6 +391,13 @@ def _scan_batches_to_spark(
         pending_rows = 0
 
     for batch in reader:
+        if skip_rows > 0:
+            n = batch.num_rows
+            if n <= skip_rows:
+                skip_rows -= n
+                continue
+            batch = _slice_record_batch(batch, skip_rows)
+            skip_rows = 0
         pending.append(batch)
         pending_rows += batch.num_rows
         row_count += batch.num_rows
@@ -386,11 +412,12 @@ def _scan_batches_to_spark(
             flush_chunk()
 
     flush_chunk()
+    total_rows = rows_committed if cache_dir is not None else row_count
     if cache_only:
-        return spark.createDataFrame([], schema=spark_schema), row_count
+        return spark.createDataFrame([], schema=spark_schema), total_rows
     if spark_df is None:
         return spark.createDataFrame([], schema=spark_schema), 0
-    return spark_df, row_count
+    return spark_df, total_rows
 
 
 def _read_delta_via_deltalake_scan(
@@ -412,67 +439,85 @@ def _read_delta_via_deltalake_scan(
     transport_failures = 0
     last_error: BaseException | None = None
     for attempt in range(1, max_retries + 1):
-        try:
-            force_token = attempt > 1 and transport_failures == 0
-            refresh_abfs_token_env(force=force_token)
-            opts = fabric_storage_options(force=force_token)
-            _read_debug(f"read_table: deltalake scan {path} (attempt {attempt}/{max_retries})")
-            limit = opts.get("OBJECT_STORE_CONCURRENCY_LIMIT")
-            if limit:
-                _read_progress(
-                    f"read_table: OneLake object-store concurrency limit={limit} "
-                    "(raise MEDALLION_OBJECT_STORE_CONCURRENCY if reads are too slow)"
-                )
-            dt = DeltaTable(path, storage_options=opts)
-            spark_schema = _deltalake_schema_to_spark(dt)
-            _read_debug("read_table: deltalake scan() streaming batches...")
-            reader = dt.scan()
-            df, row_count = _scan_batches_to_spark(
-                spark, reader, spark_schema, cache_dir=cache_dir
+        force_token = attempt > 1 and transport_failures == 0
+        refresh_abfs_token_env(force=force_token)
+        opts = fabric_storage_options(force=force_token)
+        _read_progress(f"read_table: deltalake scan {path} (pass {attempt}/{max_retries})")
+        limit = opts.get("OBJECT_STORE_CONCURRENCY_LIMIT")
+        if limit:
+            _read_debug(
+                f"read_table: OneLake object-store concurrency limit={limit} "
+                "(raise MEDALLION_OBJECT_STORE_CONCURRENCY if reads are too slow)"
             )
-            _read_debug(f"read_table: scan -> Spark ({row_count} rows)")
-            if cache_dir is not None and cache_file_exists(cache_dir):
-                _read_progress(
-                    f"read_table: opening local parquet cache ({row_count} rows) -> {cache_dir}"
-                )
-                return _read_parquet_cache_dir(
-                    spark, cache_dir, table_fqn or ""
-                )
-            return df
+        try:
+            while transport_failures < max_transport:
+                try:
+                    dt = DeltaTable(path, storage_options=opts)
+                    spark_schema = _deltalake_schema_to_spark(dt)
+                    _read_debug("read_table: deltalake scan() streaming batches...")
+                    reader = dt.scan()
+                    wipe_cache = _scan_should_wipe_cache(
+                        cache_dir, transport_failures=transport_failures
+                    )
+                    df, row_count = _scan_batches_to_spark(
+                        spark,
+                        reader,
+                        spark_schema,
+                        cache_dir=cache_dir,
+                        wipe_cache=wipe_cache,
+                    )
+                    _read_debug(f"read_table: scan -> Spark ({row_count} rows)")
+                    if cache_dir is not None and cache_file_exists(cache_dir):
+                        _mark_cache_complete(cache_dir, row_count)
+                        _read_progress(
+                            f"read_table: opening local parquet cache ({row_count} rows) -> {cache_dir}"
+                        )
+                        return _read_parquet_cache_dir(
+                            spark, cache_dir, table_fqn or ""
+                        )
+                    return df
+                except Exception as exc:
+                    last_error = exc
+                    if not _scan_retriable_error(exc):
+                        raise
+                    if _scan_error_is_transport(exc):
+                        transport_failures += 1
+                        committed = (
+                            _read_scan_rows_committed(cache_dir) if cache_dir else 0
+                        )
+                        if transport_failures >= max_transport:
+                            partial = ""
+                            if committed > 0 and cache_dir is not None:
+                                partial = (
+                                    f"\nPartial cache: {committed:,} rows at {cache_dir}. "
+                                    "Re-run the same read without MEDALLION_CACHE_REFRESH=1 "
+                                    "(scan will resume from committed rows)."
+                                )
+                            raise RuntimeError(
+                                "OneLake parquet download failed mid-stream (HTTP body/connect error). "
+                                "This is not an expired token — az login refresh will not fix it.\n"
+                                f"Error: {exc!s}\n"
+                                "What works reliably:\n"
+                                "  1) Use existing local cache: "
+                                f"{Path.home() / '.fabric' / 'medallion_cache'} (cache hit = no OneLake).\n"
+                                "  2) Seed cache from Fabric: run Spark read in Fabric, write parquet, copy to medallion_cache.\n"
+                                "Stopgap: MEDALLION_LOCAL_TABLE_CACHE=1, avoid MEDALLION_CACHE_REFRESH=1, "
+                                "MEDALLION_OBJECT_STORE_CONCURRENCY=1."
+                                f"{partial}"
+                            ) from exc
+                        wait = min(5 * transport_failures, 20)
+                        _read_progress(
+                            f"read_table: OneLake stream interrupted ({transport_failures}/{max_transport}), "
+                            f"resume partial cache in {wait}s (not a full restart)..."
+                        )
+                        time.sleep(wait)
+                        continue
+                    raise
+            continue
+        except RuntimeError:
+            raise
         except Exception as exc:
             last_error = exc
-            if cache_dir is not None and not cache_file_exists(cache_dir):
-                shutil.rmtree(cache_dir, ignore_errors=True)
-            elif cache_dir is not None and cache_file_exists(cache_dir):
-                _read_progress(
-                    f"read_table: scan error — keeping partial cache at {cache_dir}"
-                )
-            if not _scan_retriable_error(exc):
-                raise
-            if _scan_error_is_transport(exc):
-                transport_failures += 1
-                if transport_failures >= max_transport:
-                    if cache_dir is not None and cache_dir.exists():
-                        shutil.rmtree(cache_dir, ignore_errors=True)
-                    raise RuntimeError(
-                        "OneLake parquet download failed mid-stream (HTTP body/connect error). "
-                        "This is not an expired token — az login refresh will not fix it.\n"
-                        f"Error: {exc!s}\n"
-                        "What works reliably:\n"
-                        "  1) Use existing local cache: "
-                        f"{Path.home() / '.fabric' / 'medallion_cache'} (cache hit = no OneLake).\n"
-                        "  2) Seed cache from Fabric: run Spark read in Fabric, write parquet, copy to medallion_cache.\n"
-                        "  3) Tomorrow: Azure SDK per-file download or PySpark cache-fill (column mapping).\n"
-                        "Stopgap: MEDALLION_LOCAL_TABLE_CACHE=1, avoid MEDALLION_CACHE_REFRESH=1, "
-                        "MEDALLION_OBJECT_STORE_CONCURRENCY=1."
-                    ) from exc
-                wait = min(5 * transport_failures, 20)
-                _read_progress(
-                    f"read_table: OneLake stream interrupted ({transport_failures}/{max_transport}), "
-                    f"retry in {wait}s (not a token issue)..."
-                )
-                time.sleep(wait)
-                continue
             if attempt >= max_retries:
                 raise
             wait = min(2**attempt, 15)
@@ -531,6 +576,64 @@ def cache_file_exists(cache_dir: Path) -> bool:
     return cache_dir.is_dir() and any(cache_dir.glob("*.parquet"))
 
 
+def _cache_complete_marker(cache_dir: Path) -> Path:
+    return cache_dir / "_cache_complete"
+
+
+def _scan_rows_committed_path(cache_dir: Path) -> Path:
+    return cache_dir / "_scan_rows_committed"
+
+
+def cache_read_ready(cache_dir: Path) -> bool:
+    """True when local parquet cache finished a full OneLake scan (not a partial download)."""
+    return cache_file_exists(cache_dir) and _cache_complete_marker(cache_dir).is_file()
+
+
+def _scan_resume_partial_enabled() -> bool:
+    return os.environ.get("MEDALLION_SCAN_RESUME_PARTIAL", "1").lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+
+
+def _read_scan_rows_committed(cache_dir: Path) -> int:
+    try:
+        return int(_scan_rows_committed_path(cache_dir).read_text().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_scan_rows_committed(cache_dir: Path, rows: int) -> None:
+    _scan_rows_committed_path(cache_dir).write_text(str(rows))
+
+
+def _mark_cache_complete(cache_dir: Path, row_count: int) -> None:
+    _cache_complete_marker(cache_dir).write_text(str(row_count))
+    _scan_rows_committed_path(cache_dir).unlink(missing_ok=True)
+
+
+def _clear_scan_cache_dir(cache_dir: Path) -> None:
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def _scan_should_wipe_cache(cache_dir: Path | None, *, transport_failures: int) -> bool:
+    if cache_dir is None:
+        return False
+    if _local_cache_refresh():
+        return True
+    if transport_failures > 0 and _scan_resume_partial_enabled():
+        return False
+    return _read_scan_rows_committed(cache_dir) == 0
+
+
+def _slice_record_batch(batch, offset: int):
+    if offset <= 0:
+        return batch
+    return batch.slice(offset)
+
+
 def local_cache_path(table_fqn: str) -> Path:
     override = os.environ.get("MEDALLION_LOCAL_CACHE_DIR")
     root = Path(override) if override else Path.home() / ".fabric" / "medallion_cache"
@@ -551,7 +654,7 @@ def _read_from_local_cache(spark: SparkSession, table_fqn: str) -> DataFrame | N
     if not _local_table_cache_enabled() or _local_cache_refresh():
         return None
     path = local_cache_path(table_fqn)
-    if not path.is_dir() or not any(path.glob("*.parquet")):
+    if not cache_read_ready(path):
         return None
     _read_progress(f"read_table: cache hit {table_fqn}")
     return _read_parquet_cache_dir(spark, path, table_fqn)
@@ -732,7 +835,7 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
                 need_scan = (
                     _local_cache_refresh()
                     or not _local_table_cache_enabled()
-                    or not cache_file_exists(cache_dir)
+                    or not cache_read_ready(cache_dir)
                 )
                 if need_scan:
                     if _local_cache_refresh() and cache_dir.exists():
@@ -740,7 +843,7 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
                     _read_delta_via_deltalake_scan(
                         spark, path, cache_dir=cache_dir, table_fqn=table_fqn
                     )
-                if cache_file_exists(cache_dir):
+                if cache_read_ready(cache_dir):
                     return _read_parquet_cache_dir(spark, cache_dir, table_fqn)
                 df = _read_delta_via_deltalake_scan(
                     spark, path, cache_dir=None, table_fqn=table_fqn
@@ -868,7 +971,7 @@ def read_table_broken_lineage(
     if (
         _local_table_cache_enabled()
         and not _local_cache_refresh()
-        and cache_file_exists(cache_path)
+        and cache_read_ready(cache_path)
     ):
         _read_progress(f"read_table_broken_lineage: cache hit ({label})")
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
@@ -879,7 +982,7 @@ def read_table_broken_lineage(
         return df
 
     df = read_table(spark, table_fqn)
-    if _local_table_cache_enabled() and cache_file_exists(cache_path):
+    if _local_table_cache_enabled() and cache_read_ready(cache_path):
         _read_progress(
             f"read_table_broken_lineage: re-open cache after read_table ({label})"
         )
