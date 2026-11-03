@@ -843,19 +843,22 @@ def read_table_broken_lineage(
             "use local medallion_cache + CreationDate filters in transform (avoid onelake.blob scoped scan)."
         )
     cache_path = local_cache_path(table_fqn)
-    cache_ok = _local_table_cache_enabled() and not _local_cache_refresh()
+    lake_path = delta_path_for_table(table_fqn)
+    scan_backend = bool(
+        lake_path and _use_path_reads() and _resolve_read_backend(lake_path) == "scan"
+    )
 
-    if cache_ok and cache_file_exists(cache_path):
+    if (
+        _local_table_cache_enabled()
+        and not _local_cache_refresh()
+        and cache_file_exists(cache_path)
+    ):
         _read_progress(f"read_table_broken_lineage: cache hit ({label})")
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
 
-    lake_path = delta_path_for_table(table_fqn)
-    use_scan = bool(
-        cache_ok
-        and lake_path
-        and _resolve_read_backend(lake_path) == "scan"
-    )
-    if use_scan:
+    # Scan -> pyarrow cache (no Spark shuffle). Must run on refresh too — otherwise we
+    # fall through to break_lineage_local on ~400k+ rows and Windows Python workers crash.
+    if scan_backend and _local_table_cache_enabled():
         if _local_cache_refresh() and cache_path.exists():
             shutil.rmtree(cache_path, ignore_errors=True)
         _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
@@ -875,14 +878,12 @@ def read_table_broken_lineage(
             f"read_table_broken_lineage: re-open cache after read_table ({label})"
         )
         return _read_parquet_cache_dir(spark, cache_path, table_fqn)
-    if _use_path_reads() and _local_table_cache_enabled():
-        lake_path = delta_path_for_table(table_fqn)
-        if lake_path and _resolve_read_backend(lake_path) == "scan":
-            raise RuntimeError(
-                f"read_table_broken_lineage: scan cache missing for {table_fqn} ({label}). "
-                f"Check {cache_path} and MEDALLION_LOCAL_TABLE_CACHE. "
-                "Avoid break_lineage collect on large tables."
-            )
+    if scan_backend:
+        _read_progress(
+            f"read_table_broken_lineage: {label} — scan DataFrame in-process "
+            "(MEDALLION_LOCAL_TABLE_CACHE=0; no break_lineage)"
+        )
+        return df
     return break_lineage_local(spark, df, label)
 
 
