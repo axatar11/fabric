@@ -555,7 +555,10 @@ def _read_from_local_cache(spark: SparkSession, table_fqn: str) -> DataFrame | N
 
 
 def _local_parquet_use_spark_writer() -> bool:
-    flag = os.environ.get("MEDALLION_STAGING_SPARK_PARQUET", "1")
+    flag = os.environ.get("MEDALLION_STAGING_SPARK_PARQUET")
+    if flag is None:
+        # Local OneLake path: chunked driver collect avoids Python worker shuffle crashes.
+        return not _use_path_reads()
     return flag.lower() not in ("0", "false", "no")
 
 
@@ -884,16 +887,6 @@ def read_table_broken_lineage(
 def break_lineage_local(spark: SparkSession, df: DataFrame, label: str) -> DataFrame:
     """Write/read local parquet so later joins are not stuck on an old broadcast plan."""
     apply_local_merge_spark_conf(spark)
-    max_driver_rows = int(os.environ.get("MEDALLION_BREAK_LINEAGE_DRIVER_ROWS", "10000"))
-    try:
-        if df.limit(max_driver_rows + 1).count() <= max_driver_rows:
-            pdf = df.toPandas()
-            _read_progress(
-                f"break_lineage_local: {label} — driver materialize ({len(pdf)} rows)"
-            )
-            return spark.createDataFrame(pdf, schema=df.schema)
-    except Exception as exc:
-        _read_debug(f"break_lineage_local: driver materialize skipped ({exc!s})")
     path = Path.home() / ".fabric" / "merge_staging" / "_break" / label
     _read_progress(f"break_lineage_local: {label} -> {path}")
     _write_df_to_local_parquet(df, path, staging=True)
@@ -1123,8 +1116,6 @@ def append_table(df: DataFrame, table_name: str) -> None:
     staging = merge_staging_path(table_name)
     if path and _use_deltalake_onelake_write():
         apply_local_merge_spark_conf(df.sparkSession)
-        safe = table_name.replace(".", "__")
-        df = break_lineage_local(df.sparkSession, df, f"append_break_{safe}")
         publish_merge_staging(df, table_name)
         if not staging.is_dir() or not any(staging.glob("*.parquet")):
             raise RuntimeError(
@@ -1154,8 +1145,6 @@ def write_full_table(df: DataFrame | None, table_name: str) -> None:
     if path and _use_deltalake_onelake_write():
         if df is not None:
             apply_local_merge_spark_conf(df.sparkSession)
-            safe = table_name.replace(".", "__")
-            df = break_lineage_local(df.sparkSession, df, f"write_break_{safe}")
             publish_merge_staging(df, table_name)
         if not staging.is_dir() or not any(staging.glob("*.parquet")):
             raise RuntimeError(
