@@ -68,6 +68,8 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`trim_lower(col)`** | Lowercase trimmed column expression. |
 | **`is_valid_email(col)`** | Filter expression for basic email shape. |
 | **`date_from_yyyymm(col)`** | `Month_No` int → first day of month date. |
+| **`filter_to_month_no(df, month_col, month_no)`** | When `month_no` is set (YYYYMM), keep only that month. |
+| **`filter_through_close_month_ts(df, ts_col, month_no)`** | When `month_no` is set, keep rows with `ts_col` before the next calendar month. |
 | **`load_country_lookup(spark, TABLE_COUNTRY)`** | Country → display name for normalization. |
 | **`with_normalized_country(df, …)`** | Left join lookup; default `No Country`. |
 | **`join_okta_for_cursor_usage` / `join_hc_for_cursor_usage`** | Equi-join helpers (optional; cursor_usage silver notebook inlines joins). |
