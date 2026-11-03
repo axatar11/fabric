@@ -190,13 +190,10 @@ def _build_spark(app_name: str):
 def _get_spark(notebook_globals: dict[str, Any], app_name: str):
     existing = notebook_globals.get("spark")
     if existing is not None and os.environ.get("MEDALLION_FRESH_SPARK") != "1":
-        try:
-            existing.sparkContext
+        if io.spark_is_alive(existing):
             if io._use_path_reads():
                 fabric_storage.apply_azure_cli_abfs_conf(existing)
             return existing, {"runtime": _runtime(), "mode": "attached"}
-        except Exception:
-            pass
     settings = _local_settings()
     create = settings.get("create_spark")
     if callable(create):
@@ -300,12 +297,7 @@ def _notebook_reload_io_helpers(
     spark = ng.get("spark")
     if spark is None:
         raise RuntimeError("No spark session in notebook; run init_notebook first.")
-    ng["read_table"] = lambda name: io.read_table(spark, name)  # noqa: E731
-    ng["read_table_broken_lineage"] = _bind_read_table_broken_lineage(spark)
-    ng["load_delta_path"] = lambda path: io.load_delta_path(spark, path)
-    ng["write_full_table"] = io.write_full_table
-    ng["append_table"] = io.append_table
-    ng["merge_incremental"] = io.merge_incremental
+    _bind_spark_io(ng, spark)
     ng["filter_to_month_no"] = transforms.filter_to_month_no
     ng["filter_through_close_month_ts"] = transforms.filter_through_close_month_ts
     ng["read_cursor_frozen_month_nos"] = io.read_cursor_frozen_month_nos
@@ -321,10 +313,6 @@ def _notebook_reload_io_helpers(
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
     ng["exclude_month_nos"] = transforms.exclude_month_nos
     ng["save_table_cache"] = io.save_table_cache
-    ng["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
-    ng["apply_local_merge_spark_conf"] = io.apply_local_merge_spark_conf
-    ng["break_lineage_local"] = _bind_break_lineage_local(spark)
-    ng["publish_merge_staging"] = io.publish_merge_staging
     ng["reload_io_helpers"] = _bind_reload_io_helpers(ng)
     print("Reloaded Common.io (spark session and existing DataFrames unchanged).")
 
@@ -332,6 +320,58 @@ def _notebook_reload_io_helpers(
 def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
     """Reload ``io`` / ``transforms`` after code changes; keeps the same ``spark`` session."""
     _notebook_reload_io_helpers(notebook_globals)
+
+
+def _bind_spark_io(notebook_globals: dict[str, Any], spark) -> None:
+    """Wire read/write helpers to the live notebook ``spark`` session."""
+
+    def _ensure_live_spark() -> None:
+        s = notebook_globals.get("spark")
+        if io.spark_is_alive(s):
+            return
+        print("Spark JVM not running — starting a new session (re-run transform after this).", flush=True)
+        _stop_active_spark()
+        new_spark, _info = _build_spark("Medallion")
+        notebook_globals["spark"] = new_spark
+        _bind_spark_io(notebook_globals, new_spark)
+
+    def write_full_table(df, table_name):
+        _ensure_live_spark()
+        return io.write_full_table(df, table_name, spark=notebook_globals["spark"])
+
+    def append_table(df, table_name):
+        _ensure_live_spark()
+        return io.append_table(df, table_name, spark=notebook_globals["spark"])
+
+    def publish_merge_staging(df, table_fqn):
+        _ensure_live_spark()
+        return io.publish_merge_staging(df, table_fqn, spark=notebook_globals["spark"])
+
+    def merge_incremental(*args):
+        _ensure_live_spark()
+        s = notebook_globals["spark"]
+        if len(args) == 4:
+            _, df, table_name, merge_key = args
+            return io.merge_incremental(s, df, table_name, merge_key)
+        if len(args) == 3:
+            df, table_name, merge_key = args
+            return io.merge_incremental(s, df, table_name, merge_key)
+        raise TypeError("merge_incremental(spark, df, table, key) or merge_incremental(df, table, key)")
+
+    notebook_globals["read_table"] = lambda name: io.read_table(spark, name)  # noqa: E731
+    notebook_globals["read_table_broken_lineage"] = _bind_read_table_broken_lineage(spark)
+    notebook_globals["load_delta_path"] = lambda path: io.load_delta_path(spark, path)
+    notebook_globals["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
+    notebook_globals["write_full_table"] = write_full_table
+    notebook_globals["append_table"] = append_table
+    notebook_globals["publish_merge_staging"] = publish_merge_staging
+    notebook_globals["merge_incremental"] = merge_incremental
+    notebook_globals["break_lineage_local"] = _bind_break_lineage_local(spark)
+    def apply_local_merge_spark_conf(*_args, **_kwargs):
+        _ensure_live_spark()
+        return io.apply_local_merge_spark_conf(notebook_globals["spark"])
+
+    notebook_globals["apply_local_merge_spark_conf"] = apply_local_merge_spark_conf
 
 
 def _bind_reload_io_helpers(notebook_globals: dict[str, Any]):
@@ -358,19 +398,12 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     importlib.reload(transforms)
     _ensure_onelake_read_deps()
     spark, info = _get_spark(notebook_globals, app_name)
-    read_table = lambda name: io.read_table(spark, name)  # noqa: E731
 
     notebook_globals.update(
         {
             "spark": spark,
             "F": F,
-            "read_table": read_table,
-            "read_table_broken_lineage": _bind_read_table_broken_lineage(spark),
-            "load_delta_path": lambda path: io.load_delta_path(spark, path),
             "bronze_cursor_path": config.ONELAKE_CURSOR_BRONZE_PATH,
-            "write_full_table": io.write_full_table,
-            "append_table": io.append_table,
-            "merge_incremental": io.merge_incremental,
             "filter_to_month_no": transforms.filter_to_month_no,
             "filter_through_close_month_ts": transforms.filter_through_close_month_ts,
             "read_cursor_frozen_month_nos": io.read_cursor_frozen_month_nos,
@@ -383,9 +416,6 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "replace_months_in_frame": io.replace_months_in_frame,
             "write_cursor_okta_rejects": io.write_cursor_okta_rejects,
             "_distinct_month_nos": io._distinct_month_nos,
-            "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
-            "break_lineage_local": _bind_break_lineage_local(spark),
-            "publish_merge_staging": io.publish_merge_staging,
             "trim_lower": transforms.trim_lower,
             "is_valid_email": transforms.is_valid_email,
             "date_from_yyyymm": transforms.date_from_yyyymm,
@@ -406,9 +436,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "show_sample": show_sample,
             "reload_io_helpers": _bind_reload_io_helpers(notebook_globals),
             "save_table_cache": io.save_table_cache,
-            "load_table_cache": lambda name: io.load_table_cache(spark, name),
         }
     )
+    _bind_spark_io(notebook_globals, spark)
     for name in config.CONFIG_NAMES:
         if hasattr(config, name):
             notebook_globals[name] = getattr(config, name)
