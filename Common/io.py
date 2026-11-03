@@ -1238,6 +1238,13 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
                 )
         table_exists = _deltalake_table_exists(path)
         dt = None
+        if not table_exists:
+            try:
+                dt = DeltaTable(path, storage_options=opts)
+                table_exists = True
+                _read_progress("merge_incremental: existing Delta table found (merge, not overwrite)")
+            except Exception:
+                dt = None
         chunk_no = 0
         for source in _parquet_staging_batches(staging):
             chunk_no += 1
@@ -1247,6 +1254,7 @@ def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> 
                 continue
             _read_progress(f"merge_incremental: chunk {chunk_no} ({len(source)} rows)...")
             if not table_exists:
+                _read_progress("merge_incremental: new table — initial overwrite")
                 write_deltalake(
                     path,
                     source,
