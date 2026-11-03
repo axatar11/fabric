@@ -308,6 +308,7 @@ def _notebook_reload_io_helpers(
     ng["merge_incremental"] = io.merge_incremental
     ng["filter_to_month_no"] = transforms.filter_to_month_no
     ng["read_cursor_frozen_month_nos"] = io.read_cursor_frozen_month_nos
+    ng["cursor_frozen_month_nos_to_skip"] = io.cursor_frozen_month_nos_to_skip
     ng["cursor_excluded_month_nos"] = io.cursor_excluded_month_nos
     ng["sync_cursor_close_month_env"] = io.sync_cursor_close_month_env
     ng["append_cursor_freeze_month"] = io.append_cursor_freeze_month
@@ -367,6 +368,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "merge_incremental": io.merge_incremental,
             "filter_to_month_no": transforms.filter_to_month_no,
             "read_cursor_frozen_month_nos": io.read_cursor_frozen_month_nos,
+            "cursor_frozen_month_nos_to_skip": io.cursor_frozen_month_nos_to_skip,
             "cursor_excluded_month_nos": io.cursor_excluded_month_nos,
             "sync_cursor_close_month_env": io.sync_cursor_close_month_env,
             "append_cursor_freeze_month": io.append_cursor_freeze_month,
