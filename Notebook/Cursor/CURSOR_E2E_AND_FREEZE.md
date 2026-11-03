@@ -10,11 +10,11 @@ CURSOR_CLOSE_MONTH_NO = None      # daily
 | Value | Behavior |
 |-------|----------|
 | **`None`** | Daily: process bronze/silver/gold for **non-frozen** months only (`Gold.ingest_freeze_control`). |
-| **`202610`** | Month-close: reload **October 2026 only** (bronze, HC, cursor silver, both gold), then **auto-freeze** after `NB_CursorOnboard_Gold`. |
+| **`202610`** | Month-close: reload **October 2026 only** (HC, cursor bronze/silver, both gold). **Okta:** same switch but always **full** bronze → silver (all rows; no `updated_at` slice). Then **auto-freeze** after `NB_CursorOnboard_Gold`. |
 
 Same line in:
 
-1. `NB_OktaUserforAI_Bronze_To_Silver` (Okta still full load; switch kept for consistency)
+1. `NB_OktaUserforAI_Bronze_To_Silver` (full load only — `CURSOR_CLOSE_MONTH_NO` does not filter Okta)
 2. `NB_HCHistorical_Bronze_To_Silver`
 3. `NB_CursorUsage_Bronze_To_Silver`
 4. `NB_CursorUsage_Gold`
