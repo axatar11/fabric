@@ -829,6 +829,29 @@ def _write_df_via_local_iterator_chunks(df: DataFrame, path: Path) -> None:
         raise RuntimeError("localIterator produced no parquet output")
 
 
+def _commit_parquet_dir(tmp: Path, path: Path) -> None:
+    """Replace ``path`` with finished ``tmp`` (Windows-safe; Spark may lock old files)."""
+    import uuid
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup: Path | None = None
+    if path.exists():
+        backup = path.parent / f"{path.name}.__old__{uuid.uuid4().hex[:8]}"
+        try:
+            path.replace(backup)
+        except OSError:
+            shutil.rmtree(path, ignore_errors=True)
+            backup = None
+    try:
+        tmp.replace(path)
+    except OSError:
+        shutil.move(str(tmp), str(path))
+    if backup is not None and backup.exists():
+        shutil.rmtree(backup, ignore_errors=True)
+    if tmp.exists():
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _write_spark_parquet_dir(df: DataFrame, path: Path) -> None:
     """JVM parquet to file:// (no Python worker / Arrow collect — safe for large join plans)."""
     tmp = path.parent / f"{path.name}.__writing__"
@@ -837,9 +860,7 @@ def _write_spark_parquet_dir(df: DataFrame, path: Path) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     target = tmp.resolve().as_uri()
     df.write.mode("overwrite").parquet(target)
-    if path.exists():
-        shutil.rmtree(path, ignore_errors=True)
-    tmp.rename(path)
+    _commit_parquet_dir(tmp, path)
 
 
 def _staging_jvm_partition_counts() -> list[int]:
@@ -1154,28 +1175,8 @@ def transform_staging_path(table_fqn: str) -> Path:
     return Path.home() / ".fabric" / "transform_staging" / safe
 
 
-_STAGING_PUBLISHED_MARKER = "_staging_published_at"
-
-
-def _merge_staging_publish_marker(staging_dir: Path) -> Path:
-    return staging_dir / _STAGING_PUBLISHED_MARKER
-
-
-def _merge_staging_recently_published(staging_dir: Path, *, max_age_sec: float) -> bool:
-    if not cache_file_exists(staging_dir):
-        return False
-    marker = _merge_staging_publish_marker(staging_dir)
-    if not marker.is_file():
-        return False
-    try:
-        age = time.time() - float(marker.read_text().strip())
-    except (OSError, ValueError):
-        return False
-    return age >= 0 and age <= max_age_sec
-
-
-def _mark_merge_staging_published(staging_dir: Path) -> None:
-    _merge_staging_publish_marker(staging_dir).write_text(str(time.time()))
+# In-process guard: skip only back-to-back publish to merge_staging (old notebook cells).
+_merge_staging_last_publish_mono: dict[str, float] = {}
 
 
 def medallion_io_build_info() -> dict[str, str | bool]:
@@ -1189,7 +1190,15 @@ def medallion_io_build_info() -> dict[str, str | bool]:
         "io_sha12": digest,
         "transform_staging": True,
         "skip_duplicate_merge_publish": True,
+        "reload_medallion_code": True,
     }
+
+
+def reload_medallion_code(notebook_globals: dict) -> None:
+    """Reload ``Common.io`` / transforms after ``git pull`` (keeps ``spark`` and DataFrames)."""
+    from Common.bootstrap import reload_io_helpers
+
+    reload_io_helpers(notebook_globals)
 
 
 def read_table_broken_lineage(
@@ -1282,11 +1291,13 @@ def publish_merge_staging(
         "true",
         "yes",
     ):
-        max_age = float(os.environ.get("MEDALLION_STAGING_REPUBLISH_MIN_SEC", "300"))
-        if _merge_staging_recently_published(merge_out, max_age_sec=max_age):
+        dedupe_sec = float(os.environ.get("MEDALLION_STAGING_REPUBLISH_DEDUPE_SEC", "3"))
+        last = _merge_staging_last_publish_mono.get(table_fqn)
+        now = time.monotonic()
+        if last is not None and (now - last) <= dedupe_sec:
             _read_progress(
-                f"publish_merge_staging: skip duplicate republish for {table_fqn} "
-                f"(fresh merge_staging; set MEDALLION_FORCE_REPUBLISH=1 to rebuild)"
+                f"publish_merge_staging: skip back-to-back republish for {table_fqn} "
+                f"(within {dedupe_sec:g}s; set MEDALLION_FORCE_REPUBLISH=1 to rebuild)"
             )
             return merge_out
     _read_progress(f"publish_merge_staging: {table_fqn} -> {path}")
@@ -1305,7 +1316,7 @@ def publish_merge_staging(
             df = collapse_lineage_to_local_parquet(spark, df, label)
     _write_df_to_local_parquet(df, path, staging=True)
     if writing_merge_out:
-        _mark_merge_staging_published(merge_out)
+        _merge_staging_last_publish_mono[table_fqn] = time.monotonic()
     return path
 
 
@@ -1428,6 +1439,8 @@ def replace_months_in_frame(
     """Keep other months in target; replace listed ``month_nos`` with ``month_df`` (may be empty)."""
     from pyspark.sql import functions as F
 
+    from Common import config
+
     if not month_nos:
         return month_df
     month_set = [int(m) for m in month_nos]
@@ -1439,7 +1452,11 @@ def replace_months_in_frame(
                 out = kept.unionByName(month_df, allowMissingColumns=True)
             else:
                 out = kept
-            if _use_path_reads():
+            skip_collapse = table_name in (
+                config.TABLE_PURVIEW_COPILOT_OKTA_REJECT,
+                config.TABLE_CURSOR_OKTA_REJECT,
+            )
+            if _use_path_reads() and not skip_collapse:
                 label = f"replace_months_{table_name.rsplit('.', 1)[-1]}"
                 out = collapse_lineage_to_local_parquet(spark, out, label)
             return out
