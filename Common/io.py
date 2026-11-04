@@ -1196,9 +1196,9 @@ def medallion_io_build_info() -> dict[str, str | bool]:
 
 def reload_medallion_code(notebook_globals: dict) -> None:
     """Reload ``Common.io`` / transforms after ``git pull`` (keeps ``spark`` and DataFrames)."""
-    from Common.bootstrap import reload_io_helpers
+    from Common.bootstrap import reload_medallion_code as _reload
 
-    reload_io_helpers(notebook_globals)
+    _reload(notebook_globals)
 
 
 def read_table_broken_lineage(
