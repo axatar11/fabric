@@ -1,0 +1,40 @@
+-- Fabric lakehouse: AI_Medallion / Silver schema.
+-- Rows = Purview Copilot bronze grain with no Okta match (primary + fallback email).
+-- Pipeline replaces rows per purview_copilot_usage_month_no each silver batch (see write_copilot_okta_rejects).
+
+CREATE TABLE IF NOT EXISTS Silver.purview_copilot_usage_okta_reject (
+  purview_copilot_usage_record_id              STRING    NOT NULL,
+  purview_copilot_usage_date                   DATE,
+  purview_copilot_usage_record_type            INT,
+  purview_copilot_usage_operation              STRING,
+  purview_copilot_usage_email                  STRING,
+  purview_copilot_usage_associated_admin_units STRING,
+  purview_copilot_usage_associated_admin_units_names STRING,
+  purview_copilot_usage_app_identity           STRING,
+  purview_copilot_usage_application_name       STRING,
+  purview_copilot_usage_app_host               STRING,
+  purview_copilot_usage_agent_name             STRING,
+  purview_copilot_usage_target_agent_name      STRING,
+  purview_copilot_usage_license_type           STRING,
+  purview_copilot_usage_conversation_id        STRING,
+  purview_copilot_usage_thread_id              STRING,
+  purview_copilot_usage_model_name             STRING,
+  purview_copilot_usage_model_provider_name    STRING,
+  purview_copilot_usage_copilot_log_version    STRING,
+  purview_copilot_usage_file_name              STRING,
+  purview_copilot_usage_ingestion_date         TIMESTAMP,
+  purview_copilot_usage_email_fallback         STRING,
+  purview_copilot_usage_has_prompt             BOOLEAN,
+  purview_copilot_usage_interaction_type       STRING,
+  purview_copilot_usage_has_model_info         BOOLEAN,
+  purview_copilot_usage_has_resource_access    BOOLEAN,
+  purview_copilot_usage_message_count          INT,
+  purview_copilot_usage_prompt_count           INT,
+  purview_copilot_usage_jailbreak_detected     BOOLEAN,
+  purview_copilot_usage_plugin_count           INT,
+  purview_copilot_usage_uses_bing_web_search   BOOLEAN,
+  purview_copilot_usage_accessed_resource_count INT,
+  purview_copilot_usage_month_no               INT       NOT NULL COMMENT 'YYYYMM; merge/replace scope',
+  okta_reject_reason                           STRING    NOT NULL COMMENT 'e.g. okta_join_miss',
+  okta_reject_loaded_at                        TIMESTAMP NOT NULL
+) USING DELTA;
