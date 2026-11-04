@@ -259,6 +259,29 @@ def purview_copilot_email_fallback(email_col: Column) -> Column:
     )
 
 
+def split_purview_okta_join(
+    base: DataFrame,
+    okta_slim: DataFrame,
+    user_email_col: str,
+    fallback_email_col: str,
+) -> tuple[DataFrame, DataFrame]:
+    """Return (Okta-matched rows, base rows with no Okta match after fallback)."""
+    joined = join_okta_purview_with_fallback(
+        base, okta_slim, user_email_col, fallback_email_col
+    )
+    matched = joined.filter(F.col("OktaUserId").isNotNull())
+    rejects = joined.filter(F.col("OktaUserId").isNull()).select(*base.columns)
+    return matched, rejects
+
+
+def purview_copilot_okta_rejects_output(rejects: DataFrame) -> DataFrame:
+    """Annotate Purview bronze-grain rejects for the silver reject table."""
+    return (
+        rejects.withColumn("okta_reject_reason", F.lit("okta_join_miss"))
+        .withColumn("okta_reject_loaded_at", F.current_timestamp())
+    )
+
+
 def join_okta_purview_with_fallback(
     base: DataFrame,
     okta_slim: DataFrame,
@@ -386,8 +409,10 @@ def build_purview_copilot_usage_silver(
     hc: DataFrame,
     *,
     min_creation_date: str,
-) -> DataFrame:
-    """Bronze purview_copilot_usage → silver grain (one row per record_id) with Okta + HC."""
+    close_month_no: int | None = None,
+    frozen_month_nos: list[int] | None = None,
+) -> tuple[DataFrame, DataFrame]:
+    """Bronze purview_copilot_usage → (silver with Okta match, Okta rejects)."""
     audit = _bronze_column(bronze, "AuditData", "audit_data")
     record_id = _bronze_column(bronze, "RecordId", "record_id")
     creation = F.to_timestamp(F.trim(_bronze_column(bronze, "CreationDate", "creation_date")))
@@ -560,13 +585,25 @@ def build_purview_copilot_usage_silver(
         F.col("OktaUserRegion"),
         F.col("OktaUserCountry"),
     )
-    joined = join_okta_purview_with_fallback(
+    base = filter_to_month_no(base, "purview_copilot_usage_month_no", close_month_no)
+    base = filter_through_close_month_ts(
+        base, "purview_copilot_usage_date", close_month_no
+    )
+    if frozen_month_nos:
+        base = exclude_month_nos(
+            base, "purview_copilot_usage_month_no", frozen_month_nos
+        )
+
+    joined, okta_rejects = split_purview_okta_join(
         base,
         okta_slim,
         "purview_copilot_usage_email",
         "purview_copilot_usage_email_fallback",
     )
     joined = joined.dropDuplicates(["purview_copilot_usage_record_id"])
+    okta_rejects = purview_copilot_okta_rejects_output(
+        okta_rejects.dropDuplicates(["purview_copilot_usage_record_id"])
+    )
     joined = joined.withColumn(
         "purview_copilot_usage_key_email",
         F.when(
@@ -601,6 +638,7 @@ def build_purview_copilot_usage_silver(
         F.col("OktaUserCountry").alias("HCOktaUserCountry"),
         F.col("HCDivisionINC"),
     )
+    hc_slim = filter_to_month_no(hc_slim, "HCMonthNo", close_month_no)
     joined = join_hc_on_email_keys(
         joined,
         hc_slim,
@@ -608,7 +646,7 @@ def build_purview_copilot_usage_silver(
         "purview_copilot_usage_key_full_email",
     )
 
-    return joined.select(
+    silver = joined.select(
         "purview_copilot_usage_record_id",
         "purview_copilot_usage_date",
         "purview_copilot_usage_record_type",
@@ -660,6 +698,7 @@ def build_purview_copilot_usage_silver(
         F.col("HCOktaUserCountry").alias("hc_okta_user_country"),
         F.col("HCDivisionINC").alias("hc_division_inc"),
     )
+    return silver, okta_rejects
 
 
 def purview_copilot_use_case_code(interaction_type: Column) -> Column:
