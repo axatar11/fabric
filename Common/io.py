@@ -620,11 +620,20 @@ def _write_df_to_local_parquet(
 ) -> None:
     """Materialize locally for cache or merge staging."""
     if staging and _use_path_reads() and _staging_prefer_chunked_collect():
-        df = _sanitize_df_for_export(df.coalesce(1))
-        _read_progress(
-            "materialize staging: chunked driver collect "
-            "(MEDALLION_STAGING_SPARK_PARQUET=0)"
-        )
+        parts = max(1, int(os.environ.get("MEDALLION_STAGING_COLLECT_PARTITIONS", "1")))
+        df = _sanitize_df_for_export(df)
+        if parts > 1:
+            df = df.repartition(parts)
+            _read_progress(
+                f"materialize staging: chunked driver collect ({parts} partitions, "
+                "MEDALLION_STAGING_SPARK_PARQUET=0)"
+            )
+        else:
+            df = df.coalesce(1)
+            _read_progress(
+                "materialize staging: chunked driver collect "
+                "(MEDALLION_STAGING_SPARK_PARQUET=0)"
+            )
         _write_df_via_local_iterator_chunks(df, path)
         return
     if staging:

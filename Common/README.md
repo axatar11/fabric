@@ -78,6 +78,7 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`purview_copilot_min_creation_date(close_month_no)`** | Daily: `PURVIEW_COPILOT_MIN_CREATION_DATE`; month-close: `YYYY-MM-01` from YYYYMM. |
 | **`build_purview_copilot_usage_silver(...)`** | Bronze **purview_copilot_usage** → `(silver, okta_rejects)` (Okta match only in silver; HC left join). |
 | **`write_copilot_okta_rejects` / `write_copilot_silver_daily`** | Same month-replace / frozen-month preserve pattern as Cursor for Copilot silver. |
+| **`MEDALLION_STAGING_SPARK_PARQUET=0`** | Cursor + Copilot silver notebooks (local): driver-side staging instead of JVM `write.parquet` (avoids heap OOM). Optional **`MEDALLION_STAGING_COLLECT_PARTITIONS`**. |
 | **`copilot_frozen_month_nos_to_skip` / `copilot_excluded_month_nos`** | Read `ingest_freeze_control` for `product` copilot or all. |
 | **`append_copilot_freeze_month`** | Append copilot freeze row after month-close gold. |
 | **`purview_active_copilot_aggregate` / `purview_active_copilot_merge_key`** | Gold **fact_copilot_active** grain (sum prompts, Request >= 1). |
