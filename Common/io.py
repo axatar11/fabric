@@ -441,6 +441,8 @@ def _read_delta_via_deltalake_scan(
     *,
     cache_dir: Path | None = None,
     table_fqn: str | None = None,
+    scan_predicate: str | None = None,
+    scan_columns: tuple[str, ...] | list[str] | None = None,
 ) -> DataFrame:
     """Azure CLI + deltalake DataFusion scan (column mapping / deletion vectors) -> Spark."""
     import time
@@ -471,8 +473,17 @@ def _read_delta_via_deltalake_scan(
                 try:
                     dt = DeltaTable(path, storage_options=opts)
                     spark_schema = _deltalake_schema_to_spark(dt)
+                    scan_kwargs: dict = {}
+                    if scan_predicate:
+                        scan_kwargs["predicate"] = scan_predicate
+                        _read_progress(f"read_table: scan predicate={scan_predicate!r}")
+                    if scan_columns:
+                        scan_kwargs["columns"] = list(scan_columns)
+                        _read_progress(
+                            f"read_table: scan column projection ({len(scan_columns)} cols)"
+                        )
                     _read_progress("read_table: deltalake scan() streaming batches…")
-                    reader = dt.scan()
+                    reader = dt.scan(**scan_kwargs) if scan_kwargs else dt.scan()
                     wipe_cache = _scan_should_wipe_cache(
                         cache_dir, transport_failures=transport_failures
                     )
@@ -993,12 +1004,11 @@ def read_table_broken_lineage(
     scan_columns: tuple[str, ...] | list[str] | None = None,
 ) -> DataFrame:
     """``read_table`` then materialize for joins — prefer local cache parquet over ``break_lineage`` collect."""
-    if scan_predicate or scan_columns:
+    cache_path = local_cache_path_for_read(table_fqn, scan_predicate=scan_predicate)
+    if scan_predicate:
         _read_progress(
-            "read_table_broken_lineage: ignoring scan_predicate/scan_columns — "
-            "full OneLake scan to local cache; filter CreationDate in notebook/transform."
+            f"read_table_broken_lineage: scoped OneLake scan -> {cache_path.name}"
         )
-    cache_path = local_cache_path(table_fqn)
     lake_path = delta_path_for_table(table_fqn)
     scan_backend = bool(
         lake_path and _use_path_reads() and _resolve_read_backend(lake_path) == "scan"
@@ -1020,6 +1030,8 @@ def read_table_broken_lineage(
                 lake_path,
                 cache_dir=cache_path,
                 table_fqn=table_fqn,
+                scan_predicate=scan_predicate,
+                scan_columns=scan_columns,
             )
             if cache_read_ready(cache_path):
                 _read_progress(

@@ -6,12 +6,12 @@ Same patterns as Cursor silver/gold.
 
 | Knob | Purpose |
 |------|---------|
-| `COPILOT_CLOSE_MONTH_NO` | Month-close: reload that YYYYMM in silver/gold. Bronze is a **full OneLake deltalake scan** into local cache; `filter_through_close_month_ts` applies month-close / min date in Spark (same as first OneLake rollout). |
+| `COPILOT_CLOSE_MONTH_NO` | Month-close: reload that YYYYMM in silver/gold. **Bronze OneLake scan reads only that calendar month** (`CreationDate` predicate + column projection), not the full multi-month bronze table. Daily (`None`): scan from `PURVIEW_COPILOT_MIN_CREATION_DATE` onward only. |
 | `REBUILD_MEDALLION_CACHE` | OneLake read cache rebuild (shared with other medallion notebooks). |
 
 Set `COPILOT_CLOSE_MONTH_NO` **before** `%run ./Common/bootstrap` via `sync_copilot_close_month_env`. There is no separate bronze month string — same knob as Cursor `CURSOR_CLOSE_MONTH_NO`.
 
-**Reads:** Same as Cursor — `read_table_broken_lineage` + `~/.fabric/medallion_cache`. Full-table deltalake scan, then Spark filters. OneLake HTTP body errors **retry in-process** and **resume partial cache** (re-run with `REBUILD_MEDALLION_CACHE=False`; keep `part-*.parquet`). Windows: `MEDALLION_OBJECT_STORE_CONCURRENCY=1` (set in `sync_rebuild_medallion_cache_env`). Only complete caches (`_cache_complete`) are cache hits.
+**Reads:** `read_table_broken_lineage` with **`copilot_bronze_scan_predicate`** (month-close or min date) and `PURVIEW_COPILOT_BRONZE_SCAN_COLUMNS` — scoped cache dir per predicate under `~/.fabric/medallion_cache/`. Transport errors retry and **resume partial cache** (`REBUILD_MEDALLION_CACHE=False`). Windows: `MEDALLION_OBJECT_STORE_CONCURRENCY=1`.
 
 ## Freeze (`Gold.ingest_freeze_control`)
 
