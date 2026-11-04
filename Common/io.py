@@ -892,7 +892,12 @@ def read_table_broken_lineage(
     scan_columns: tuple[str, ...] | list[str] | None = None,
 ) -> DataFrame:
     """``read_table`` then materialize for joins — prefer local cache parquet over ``break_lineage`` collect."""
-    cache_path = local_cache_path_for_read(table_fqn, scan_predicate=scan_predicate)
+    if scan_predicate or scan_columns:
+        _read_progress(
+            "read_table_broken_lineage: ignoring scan_predicate/scan_columns — "
+            "full OneLake scan to local cache; filter CreationDate in notebook/transform."
+        )
+    cache_path = local_cache_path(table_fqn)
     lake_path = delta_path_for_table(table_fqn)
     scan_backend = bool(
         lake_path and _use_path_reads() and _resolve_read_backend(lake_path) == "scan"
@@ -910,19 +915,12 @@ def read_table_broken_lineage(
         if _local_cache_refresh() and cache_path.exists():
             shutil.rmtree(cache_path, ignore_errors=True)
         if _local_cache_refresh() or not cache_file_exists(cache_path):
-            if scan_predicate:
-                _read_progress(
-                    f"read_table_broken_lineage: scoped OneLake scan (predicate) -> {cache_path.name}"
-                )
-            else:
-                _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
+            _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
             _read_delta_via_deltalake_scan(
                 spark,
                 lake_path,
                 cache_dir=cache_path,
                 table_fqn=table_fqn,
-                scan_predicate=scan_predicate,
-                scan_columns=scan_columns,
             )
             if cache_file_exists(cache_path):
                 _read_progress(
