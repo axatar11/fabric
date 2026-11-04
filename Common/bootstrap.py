@@ -338,6 +338,7 @@ def _notebook_reload_io_helpers(
     ng["apply_local_merge_spark_conf"] = io.apply_local_merge_spark_conf
     ng["break_lineage_local"] = _bind_break_lineage_local(spark)
     ng["publish_merge_staging"] = io.publish_merge_staging
+    ng["merge_staging_path"] = io.merge_staging_path
     ng["reload_io_helpers"] = _bind_reload_io_helpers(ng)
     print("Reloaded Common.io (spark session and existing DataFrames unchanged).")
 
@@ -410,6 +411,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
             "break_lineage_local": _bind_break_lineage_local(spark),
             "publish_merge_staging": io.publish_merge_staging,
+            "merge_staging_path": io.merge_staging_path,
             "trim_lower": transforms.trim_lower,
             "is_valid_email": transforms.is_valid_email,
             "date_from_yyyymm": transforms.date_from_yyyymm,
