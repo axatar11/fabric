@@ -75,6 +75,7 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`with_normalized_country(df, …)`** | Left join lookup; default `No Country`. |
 | **`join_okta_for_cursor_usage` / `join_hc_for_cursor_usage`** | Equi-join helpers (optional; cursor_usage silver notebook inlines joins). |
 | **`cursor_usage_record_key()`** | SHA2 merge key for **silver** cursor_usage rows. |
+| **`purview_copilot_min_creation_date(close_month_no)`** | Daily: `PURVIEW_COPILOT_MIN_CREATION_DATE`; month-close: `YYYY-MM-01` from YYYYMM. |
 | **`build_purview_copilot_usage_silver(...)`** | Bronze **purview_copilot_usage** → `(silver, okta_rejects)` (Okta match only in silver; HC left join). |
 | **`write_copilot_okta_rejects` / `write_copilot_silver_daily`** | Same month-replace / frozen-month preserve pattern as Cursor for Copilot silver. |
 | **`copilot_frozen_month_nos_to_skip` / `copilot_excluded_month_nos`** | Read `ingest_freeze_control` for `product` copilot or all. |

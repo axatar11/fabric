@@ -331,6 +331,7 @@ def _notebook_reload_io_helpers(
     ng["_distinct_month_nos"] = io._distinct_month_nos
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
     ng["split_purview_okta_join"] = transforms.split_purview_okta_join
+    ng["purview_copilot_min_creation_date"] = transforms.purview_copilot_min_creation_date
     ng["exclude_month_nos"] = transforms.exclude_month_nos
     ng["save_table_cache"] = io.save_table_cache
     ng["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
@@ -423,6 +424,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "cursor_onboard_daily_dedupe": transforms.cursor_onboard_daily_dedupe,
             "cursor_onboard_merge_key": transforms.cursor_onboard_merge_key,
             "build_purview_copilot_usage_silver": transforms.build_purview_copilot_usage_silver,
+            "purview_copilot_min_creation_date": transforms.purview_copilot_min_creation_date,
             "purview_copilot_bronze_scan_predicate": transforms.purview_copilot_bronze_scan_predicate,
             "purview_active_copilot_aggregate": transforms.purview_active_copilot_aggregate,
             "purview_active_copilot_merge_key": transforms.purview_active_copilot_merge_key,

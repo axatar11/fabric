@@ -95,6 +95,24 @@ def exclude_month_nos(df: DataFrame, month_col: str, closed_month_nos: list[int]
     return df.filter(~F.col(month_col).isin(closed_month_nos))
 
 
+def purview_copilot_min_creation_date(
+    close_month_no: int | None,
+    *,
+    default_min: str | None = None,
+) -> str:
+    """Daily: config/env min date; month-close: first day of ``close_month_no`` (YYYYMM)."""
+    if close_month_no is not None:
+        year, month = divmod(int(close_month_no), 100)
+        return f"{year}-{month:02d}-01"
+    from Common import config
+    import os
+
+    return default_min or os.environ.get(
+        "MEDALLION_PURVIEW_MIN_CREATION_DATE",
+        config.PURVIEW_COPILOT_MIN_CREATION_DATE,
+    )
+
+
 def filter_to_month_no(
     df: DataFrame, month_col: str, month_no: int | None
 ) -> DataFrame:
