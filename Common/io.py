@@ -1648,7 +1648,11 @@ def append_table(df: DataFrame, table_name: str) -> None:
 
 
 def write_full_table(df: DataFrame | None, table_name: str) -> None:
-    """Overwrite a Delta table (full load). Local: staging parquet → deltalake OneLake."""
+    """Overwrite a Delta table (full load). Local: staging parquet → deltalake OneLake.
+
+    When ``df`` is provided, this calls ``publish_merge_staging`` once. Do not publish
+    before calling (month-close notebooks: ``replace_one_month_in_frame`` then here only).
+    """
     path = _onelake_delta_path(table_name)
     staging = merge_staging_path(table_name)
     if path and _use_deltalake_onelake_write():
