@@ -760,26 +760,49 @@ def _write_df_via_local_iterator_chunks(df: DataFrame, path: Path) -> None:
         "true",
         "yes",
     )
-    try:
-        row_iter = df.toLocalIterator(prefetchPartitions=prefetch)
-    except TypeError:
-        row_iter = df.toLocalIterator()
+    def _collect_rows(row_iter) -> None:
+        try:
+            for row in row_iter:
+                buffer.append(row.asDict())
+                if len(buffer) >= chunk_rows:
+                    flush()
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "connection refused" in msg or "connectionreset" in msg:
+                raise RuntimeError(
+                    "Spark JVM disconnected during merge staging collect (often OOM or crash). "
+                    "Restart the kernel, re-run from bootstrap; keep "
+                    "MEDALLION_STAGING_COLLECT_PARTITIONS=8+, "
+                    "MEDALLION_STAGING_CHECKPOINT=0 (localCheckpoint OOMs on large Purview joins). "
+                    "Do not call break_lineage_local before publish_merge_staging."
+                ) from exc
+            raise
 
-    try:
-        for row in row_iter:
-            buffer.append(row.asDict())
-            if len(buffer) >= chunk_rows:
-                flush()
-    except Exception as exc:
-        msg = str(exc).lower()
-        if "connection refused" in msg or "connectionreset" in msg:
-            raise RuntimeError(
-                "Spark JVM disconnected during merge staging collect (often OOM or crash). "
-                "Restart the kernel, re-run from bootstrap, and keep "
-                "MEDALLION_STAGING_COLLECT_PARTITIONS=8 (or higher). "
-                "Do not coalesce staging to one partition on large Purview silver."
-            ) from exc
-        raise
+    partition_wise = os.environ.get("MEDALLION_STAGING_PARTITION_WISE", "1").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    n_parts = df.rdd.getNumPartitions()
+    if partition_wise and n_parts > 1:
+        from pyspark.sql import functions as F
+
+        for pid in range(n_parts):
+            _read_progress(
+                f"materialize staging: driver collect partition {pid + 1}/{n_parts}"
+            )
+            part_df = df.filter(F.spark_partition_id() == F.lit(pid))
+            try:
+                row_iter = part_df.toLocalIterator(prefetchPartitions=False)
+            except TypeError:
+                row_iter = part_df.toLocalIterator()
+            _collect_rows(row_iter)
+    else:
+        try:
+            row_iter = df.toLocalIterator(prefetchPartitions=prefetch)
+        except TypeError:
+            row_iter = df.toLocalIterator()
+        _collect_rows(row_iter)
     flush()
     if not any(path.glob("*.parquet")):
         raise RuntimeError("localIterator produced no parquet output")
@@ -801,10 +824,11 @@ def _write_df_to_local_parquet(
     if staging and _use_path_reads() and _staging_prefer_chunked_collect():
         parts = _staging_collect_partitions()
         df = _sanitize_df_for_export(df)
-        if os.environ.get("MEDALLION_STAGING_CHECKPOINT", "1").lower() not in (
-            "0",
-            "false",
-            "no",
+        # localCheckpoint(eager=True) OOMs on large Purview silver (#146: no JVM materialize here).
+        if os.environ.get("MEDALLION_STAGING_CHECKPOINT", "0").lower() in (
+            "1",
+            "true",
+            "yes",
         ):
             df = _materialize_local_checkpoint(df.sparkSession, df)
         df = df.repartition(parts)
