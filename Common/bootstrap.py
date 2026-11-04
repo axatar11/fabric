@@ -352,6 +352,7 @@ def _notebook_reload_io_helpers(
     ng["merge_staging_path"] = io.merge_staging_path
     ng["transform_staging_path"] = io.transform_staging_path
     ng["medallion_io_build_info"] = io.medallion_io_build_info
+    ng["reload_medallion_code"] = io.reload_medallion_code
     ng["reload_io_helpers"] = _bind_reload_io_helpers(ng)
     info = io.medallion_io_build_info()
     print(
