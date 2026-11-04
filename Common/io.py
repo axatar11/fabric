@@ -817,10 +817,67 @@ def _write_spark_parquet_dir(df: DataFrame, path: Path) -> None:
     df.write.mode("overwrite").parquet(target)
 
 
+def _staging_jvm_partition_counts() -> list[int]:
+    base = max(16, _staging_write_partitions(), _staging_collect_partitions())
+    counts: list[int] = []
+    for n in (base, max(base, 32), 64):
+        if n not in counts:
+            counts.append(n)
+    return counts
+
+
+def _write_staging_jvm_parquet(df: DataFrame, path: Path) -> bool:
+    """Try JVM parquet only (no driver toLocalIterator). Returns True on success."""
+    df = _sanitize_df_for_export(df)
+    last_exc: BaseException | None = None
+    for parts in _staging_jvm_partition_counts():
+        try:
+            staged = df.repartition(parts)
+            _read_progress(
+                f"materialize staging: Spark JVM parquet ({parts} partitions)"
+            )
+            _write_spark_parquet_dir(staged, path)
+            return True
+        except Exception as exc:
+            last_exc = exc
+            _read_debug(f"staging JVM parquet failed ({parts} parts): {exc!s}")
+    if last_exc is not None:
+        _read_progress(f"materialize staging: JVM parquet exhausted ({last_exc!s})")
+    return False
+
+
+def collapse_lineage_to_local_parquet(
+    spark: SparkSession, df: DataFrame, label: str
+) -> DataFrame:
+    """One JVM materialize of a heavy plan, then read parquet (short lineage for publish)."""
+    apply_local_merge_spark_conf(spark)
+    path = Path.home() / ".fabric" / "merge_staging" / "_collapse" / label
+    if not _write_staging_jvm_parquet(df, path):
+        raise RuntimeError(
+            f"collapse_lineage_to_local_parquet failed for {label!r}. "
+            "Increase PYSPARK_DRIVER_MEMORY / spark.driver.memory, or reduce bronze scope "
+            "(month-close COPILOT_CLOSE_MONTH_NO). Do not use driver toLocalIterator on the "
+            "full Purview join plan."
+        )
+    _read_progress(f"collapse_lineage: read back local parquet ({label})")
+    return spark.read.parquet(str(path))
+
+
 def _write_df_to_local_parquet(
     df: DataFrame, path: Path, *, staging: bool = False
 ) -> None:
     """Materialize locally for cache or merge staging."""
+    if staging and _use_path_reads():
+        if _write_staging_jvm_parquet(df, path):
+            return
+        mode = os.environ.get("MEDALLION_STAGING_MODE", "auto").lower()
+        if mode in ("jvm_only", "spark_only"):
+            raise RuntimeError(
+                "Merge staging JVM parquet failed and MEDALLION_STAGING_MODE forbids "
+                "driver collect (Purview-sized joins OOM the JVM during toLocalIterator). "
+                "Fix: month-close bronze scope, more driver memory, or "
+                "collapse_lineage_to_local_parquet() before publish_merge_staging."
+            )
     if staging and _use_path_reads() and _staging_prefer_chunked_collect():
         parts = _staging_collect_partitions()
         df = _sanitize_df_for_export(df)
@@ -1012,8 +1069,8 @@ def _staging_write_partitions() -> int:
 
 def _df_for_staging_write(df: DataFrame) -> DataFrame:
     df = _sanitize_df_for_export(df)
-    parts = _staging_write_partitions()
-    return df.repartition(parts) if parts > 1 else df.coalesce(1)
+    parts = max(4, _staging_write_partitions())
+    return df.repartition(parts)
 
 
 def apply_local_merge_spark_conf(spark: SparkSession) -> None:
@@ -1118,9 +1175,23 @@ def break_lineage_local(spark: SparkSession, df: DataFrame, label: str) -> DataF
 
 def publish_merge_staging(df: DataFrame, table_fqn: str) -> Path:
     """Call at end of transform — merge_incremental reads this (no Spark collect on join plan)."""
-    apply_local_merge_spark_conf(df.sparkSession)
+    spark = df.sparkSession
+    apply_local_merge_spark_conf(spark)
     path = merge_staging_path(table_fqn)
     _read_progress(f"publish_merge_staging: {table_fqn} -> {path}")
+    if os.environ.get("MEDALLION_PURVIEW_COLLAPSE_BEFORE_PUBLISH", "1").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        from Common import config
+
+        if table_fqn in (
+            config.TABLE_PURVIEW_COPILOT_SILVER,
+            config.TABLE_PURVIEW_COPILOT_OKTA_REJECT,
+        ):
+            label = table_fqn.rsplit(".", 1)[-1]
+            df = collapse_lineage_to_local_parquet(spark, df, label)
     _write_df_to_local_parquet(df, path, staging=True)
     return path
 
