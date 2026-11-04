@@ -1154,6 +1154,44 @@ def transform_staging_path(table_fqn: str) -> Path:
     return Path.home() / ".fabric" / "transform_staging" / safe
 
 
+_STAGING_PUBLISHED_MARKER = "_staging_published_at"
+
+
+def _merge_staging_publish_marker(staging_dir: Path) -> Path:
+    return staging_dir / _STAGING_PUBLISHED_MARKER
+
+
+def _merge_staging_recently_published(staging_dir: Path, *, max_age_sec: float) -> bool:
+    if not cache_file_exists(staging_dir):
+        return False
+    marker = _merge_staging_publish_marker(staging_dir)
+    if not marker.is_file():
+        return False
+    try:
+        age = time.time() - float(marker.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return age >= 0 and age <= max_age_sec
+
+
+def _mark_merge_staging_published(staging_dir: Path) -> None:
+    _merge_staging_publish_marker(staging_dir).write_text(str(time.time()))
+
+
+def medallion_io_build_info() -> dict[str, str | bool]:
+    """Notebook sanity check after ``git pull`` + ``reload_io_helpers(globals())``."""
+    import hashlib
+
+    io_path = Path(__file__).resolve()
+    digest = hashlib.sha256(io_path.read_bytes()).hexdigest()[:12]
+    return {
+        "io_path": str(io_path),
+        "io_sha12": digest,
+        "transform_staging": True,
+        "skip_duplicate_merge_publish": True,
+    }
+
+
 def read_table_broken_lineage(
     spark: SparkSession,
     table_fqn: str,
@@ -1236,7 +1274,21 @@ def publish_merge_staging(
     """
     spark = df.sparkSession
     apply_local_merge_spark_conf(spark)
-    path = staging_dir if staging_dir is not None else merge_staging_path(table_fqn)
+    merge_out = merge_staging_path(table_fqn)
+    path = staging_dir if staging_dir is not None else merge_out
+    writing_merge_out = path.resolve() == merge_out.resolve()
+    if writing_merge_out and os.environ.get("MEDALLION_FORCE_REPUBLISH", "0").lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        max_age = float(os.environ.get("MEDALLION_STAGING_REPUBLISH_MIN_SEC", "300"))
+        if _merge_staging_recently_published(merge_out, max_age_sec=max_age):
+            _read_progress(
+                f"publish_merge_staging: skip duplicate republish for {table_fqn} "
+                f"(fresh merge_staging; set MEDALLION_FORCE_REPUBLISH=1 to rebuild)"
+            )
+            return merge_out
     _read_progress(f"publish_merge_staging: {table_fqn} -> {path}")
     if os.environ.get("MEDALLION_PURVIEW_COLLAPSE_BEFORE_PUBLISH", "1").lower() in (
         "1",
@@ -1252,6 +1304,8 @@ def publish_merge_staging(
             label = table_fqn.rsplit(".", 1)[-1]
             df = collapse_lineage_to_local_parquet(spark, df, label)
     _write_df_to_local_parquet(df, path, staging=True)
+    if writing_merge_out:
+        _mark_merge_staging_published(merge_out)
     return path
 
 
