@@ -721,6 +721,15 @@ def _staging_prefer_chunked_collect() -> bool:
     return not _local_parquet_use_spark_writer()
 
 
+def _staging_collect_partitions() -> int:
+    """Partitions for driver-side staging collect (never 1 on large Purview/Cursor joins)."""
+    raw = os.environ.get(
+        "MEDALLION_STAGING_COLLECT_PARTITIONS",
+        os.environ.get("MEDALLION_STAGING_WRITE_PARTITIONS", "8"),
+    )
+    return max(4, int(raw))
+
+
 def _write_df_via_local_iterator_chunks(df: DataFrame, path: Path) -> None:
     """Driver-side chunked materialization (avoids one large collectToPython on Windows)."""
     import pandas as pd
@@ -746,10 +755,31 @@ def _write_df_via_local_iterator_chunks(df: DataFrame, path: Path) -> None:
         buffer = []
         part_idx += 1
 
-    for row in df.toLocalIterator():
-        buffer.append(row.asDict())
-        if len(buffer) >= chunk_rows:
-            flush()
+    prefetch = os.environ.get("MEDALLION_STAGING_PREFETCH_PARTITIONS", "1").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    try:
+        row_iter = df.toLocalIterator(prefetchPartitions=prefetch)
+    except TypeError:
+        row_iter = df.toLocalIterator()
+
+    try:
+        for row in row_iter:
+            buffer.append(row.asDict())
+            if len(buffer) >= chunk_rows:
+                flush()
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "connection refused" in msg or "connectionreset" in msg:
+            raise RuntimeError(
+                "Spark JVM disconnected during merge staging collect (often OOM or crash). "
+                "Restart the kernel, re-run from bootstrap, and keep "
+                "MEDALLION_STAGING_COLLECT_PARTITIONS=8 (or higher). "
+                "Do not coalesce staging to one partition on large Purview silver."
+            ) from exc
+        raise
     flush()
     if not any(path.glob("*.parquet")):
         raise RuntimeError("localIterator produced no parquet output")
@@ -769,20 +799,19 @@ def _write_df_to_local_parquet(
 ) -> None:
     """Materialize locally for cache or merge staging."""
     if staging and _use_path_reads() and _staging_prefer_chunked_collect():
-        parts = max(1, int(os.environ.get("MEDALLION_STAGING_COLLECT_PARTITIONS", "1")))
+        parts = _staging_collect_partitions()
         df = _sanitize_df_for_export(df)
-        if parts > 1:
-            df = df.repartition(parts)
-            _read_progress(
-                f"materialize staging: chunked driver collect ({parts} partitions, "
-                "MEDALLION_STAGING_SPARK_PARQUET=0)"
-            )
-        else:
-            df = df.coalesce(1)
-            _read_progress(
-                "materialize staging: chunked driver collect "
-                "(MEDALLION_STAGING_SPARK_PARQUET=0)"
-            )
+        if os.environ.get("MEDALLION_STAGING_CHECKPOINT", "1").lower() not in (
+            "0",
+            "false",
+            "no",
+        ):
+            df = _materialize_local_checkpoint(df.sparkSession, df)
+        df = df.repartition(parts)
+        _read_progress(
+            f"materialize staging: chunked driver collect ({parts} partitions, "
+            "MEDALLION_STAGING_SPARK_PARQUET=0)"
+        )
         _write_df_via_local_iterator_chunks(df, path)
         return
     if staging:
