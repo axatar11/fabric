@@ -27,7 +27,7 @@ VALUES ('copilot', 202609, current_timestamp(), 'manual', 'September closed');
 ## Silver
 
 - **Matched Okta only** in `purview_copilot_usage` (`split_purview_okta_join` inside `build_purview_copilot_usage_silver`).
-- **Rejects** → `purview_copilot_usage_okta_reject`, replaced per batch month via `write_copilot_okta_rejects`.
+- **Rejects** → `purview_copilot_usage_okta_reject`, replaced per batch month via `write_copilot_okta_rejects`. DDL: `Scripts/sql/purview_copilot_usage_okta_reject.sql`.
 - **Daily:** `write_copilot_silver_daily` (merge open months; keep frozen slices from target).
 - **Month-close:** `replace_one_month_in_frame` + `write_full_table`.
 
