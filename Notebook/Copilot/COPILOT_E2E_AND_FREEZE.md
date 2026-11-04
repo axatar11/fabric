@@ -11,7 +11,7 @@ Same patterns as Cursor silver/gold.
 
 Set `COPILOT_CLOSE_MONTH_NO` **before** `%run ./Common/bootstrap` via `sync_copilot_close_month_env`. There is no separate bronze month string — same knob as Cursor `CURSOR_CLOSE_MONTH_NO`.
 
-**Reads:** `read_table_broken_lineage` with **`copilot_bronze_scan_predicate`** (month-close or min date) and `PURVIEW_COPILOT_BRONZE_SCAN_COLUMNS` — scoped cache dir per predicate under `~/.fabric/medallion_cache/`. Transport errors retry and **resume partial cache** (`REBUILD_MEDALLION_CACHE=False`). Windows: `MEDALLION_OBJECT_STORE_CONCURRENCY=1`.
+**Reads:** In `NB_Purview_Copilot_BronzeToSilver`, **only Purview bronze** uses scoped scan (`copilot_bronze_scan_predicate` + `PURVIEW_COPILOT_BRONZE_SCAN_COLUMNS`) because the bronze table is large and multi-month. **Okta and HC** in the same notebook use the normal `read_table_broken_lineage` path (like Cursor) — those reads typically cache-hit. Scoped cache dirs live under `~/.fabric/medallion_cache/`. Transport errors retry and **resume partial cache** (`REBUILD_MEDALLION_CACHE=False`). Windows: `MEDALLION_OBJECT_STORE_CONCURRENCY=1`.
 
 ## Freeze (`Gold.ingest_freeze_control`)
 
