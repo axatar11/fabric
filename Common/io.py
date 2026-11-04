@@ -566,6 +566,21 @@ def local_cache_path(table_fqn: str) -> Path:
     return root / safe
 
 
+def local_cache_path_for_read(
+    table_fqn: str,
+    *,
+    scan_predicate: str | None = None,
+) -> Path:
+    """Separate cache dirs per deltalake scan predicate (month-close vs full/min-date)."""
+    base = local_cache_path(table_fqn)
+    if not scan_predicate or not str(scan_predicate).strip():
+        return base
+    import hashlib
+
+    digest = hashlib.sha256(scan_predicate.strip().encode("utf-8")).hexdigest()[:16]
+    return base.parent / f"{base.name}__scan_{digest}"
+
+
 def _read_parquet_cache_dir(
     spark: SparkSession, cache_dir: Path, table_fqn: str
 ) -> DataFrame:
@@ -877,7 +892,7 @@ def read_table_broken_lineage(
     scan_columns: tuple[str, ...] | list[str] | None = None,
 ) -> DataFrame:
     """``read_table`` then materialize for joins — prefer local cache parquet over ``break_lineage`` collect."""
-    cache_path = local_cache_path(table_fqn)
+    cache_path = local_cache_path_for_read(table_fqn, scan_predicate=scan_predicate)
     lake_path = delta_path_for_table(table_fqn)
     scan_backend = bool(
         lake_path and _use_path_reads() and _resolve_read_backend(lake_path) == "scan"
@@ -895,7 +910,12 @@ def read_table_broken_lineage(
         if _local_cache_refresh() and cache_path.exists():
             shutil.rmtree(cache_path, ignore_errors=True)
         if _local_cache_refresh() or not cache_file_exists(cache_path):
-            _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
+            if scan_predicate:
+                _read_progress(
+                    f"read_table_broken_lineage: scoped OneLake scan (predicate) -> {cache_path.name}"
+                )
+            else:
+                _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
             _read_delta_via_deltalake_scan(
                 spark,
                 lake_path,
