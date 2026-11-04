@@ -351,19 +351,40 @@ def _notebook_reload_io_helpers(
     ng["collapse_lineage_to_local_parquet"] = io.collapse_lineage_to_local_parquet
     ng["merge_staging_path"] = io.merge_staging_path
     ng["transform_staging_path"] = io.transform_staging_path
-    ng["medallion_io_build_info"] = io.medallion_io_build_info
-    ng["reload_medallion_code"] = io.reload_medallion_code
+    ng["medallion_io_build_info"] = getattr(
+        io, "medallion_io_build_info", _fallback_medallion_io_build_info
+    )
+    ng["reload_medallion_code"] = reload_medallion_code
     ng["reload_io_helpers"] = _bind_reload_io_helpers(ng)
-    info = io.medallion_io_build_info()
+    build_info = ng["medallion_io_build_info"]()
     print(
         "Reloaded Common.io (spark session and existing DataFrames unchanged). "
-        f"sha12={info['io_sha12']} transform_staging={info['transform_staging']}"
+        f"sha12={build_info.get('io_sha12', '?')} "
+        f"transform_staging={build_info.get('transform_staging', '?')}"
     )
+
+
+def _fallback_medallion_io_build_info() -> dict[str, str | bool]:
+    import hashlib
+
+    io_path = Path(io.__file__).resolve()
+    digest = hashlib.sha256(io_path.read_bytes()).hexdigest()[:12]
+    return {
+        "io_path": str(io_path),
+        "io_sha12": digest,
+        "transform_staging": hasattr(io, "transform_staging_path"),
+        "reload_medallion_code": hasattr(io, "reload_medallion_code"),
+    }
 
 
 def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
     """Reload ``io`` / ``transforms`` after code changes; keeps the same ``spark`` session."""
     _notebook_reload_io_helpers(notebook_globals)
+
+
+def reload_medallion_code(notebook_globals: dict[str, Any]) -> None:
+    """Reload ``Common.io`` after ``git pull`` — keeps ``spark`` and in-memory DataFrames."""
+    reload_io_helpers(notebook_globals)
 
 
 def _bind_reload_io_helpers(notebook_globals: dict[str, Any]):
@@ -433,7 +454,10 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "collapse_lineage_to_local_parquet": io.collapse_lineage_to_local_parquet,
             "merge_staging_path": io.merge_staging_path,
             "transform_staging_path": io.transform_staging_path,
-            "medallion_io_build_info": io.medallion_io_build_info,
+            "medallion_io_build_info": getattr(
+                io, "medallion_io_build_info", _fallback_medallion_io_build_info
+            ),
+            "reload_medallion_code": reload_medallion_code,
             "trim_lower": transforms.trim_lower,
             "is_valid_email": transforms.is_valid_email,
             "date_from_yyyymm": transforms.date_from_yyyymm,
