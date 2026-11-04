@@ -351,8 +351,13 @@ def _notebook_reload_io_helpers(
     ng["collapse_lineage_to_local_parquet"] = io.collapse_lineage_to_local_parquet
     ng["merge_staging_path"] = io.merge_staging_path
     ng["transform_staging_path"] = io.transform_staging_path
+    ng["medallion_io_build_info"] = io.medallion_io_build_info
     ng["reload_io_helpers"] = _bind_reload_io_helpers(ng)
-    print("Reloaded Common.io (spark session and existing DataFrames unchanged).")
+    info = io.medallion_io_build_info()
+    print(
+        "Reloaded Common.io (spark session and existing DataFrames unchanged). "
+        f"sha12={info['io_sha12']} transform_staging={info['transform_staging']}"
+    )
 
 
 def reload_io_helpers(notebook_globals: dict[str, Any]) -> None:
@@ -427,6 +432,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "collapse_lineage_to_local_parquet": io.collapse_lineage_to_local_parquet,
             "merge_staging_path": io.merge_staging_path,
             "transform_staging_path": io.transform_staging_path,
+            "medallion_io_build_info": io.medallion_io_build_info,
             "trim_lower": transforms.trim_lower,
             "is_valid_email": transforms.is_valid_email,
             "date_from_yyyymm": transforms.date_from_yyyymm,
