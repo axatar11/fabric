@@ -6,10 +6,12 @@ Same patterns as Cursor silver/gold.
 
 | Knob | Purpose |
 |------|---------|
-| `COPILOT_CLOSE_MONTH_NO` | Month-close: reload that YYYYMM in silver/gold; unset for daily. |
+| `COPILOT_CLOSE_MONTH_NO` | Month-close: reload that YYYYMM in silver/gold (bronze `CreationDate` through month-end, silver `min_creation_date` = first of month); unset for daily (`PURVIEW_COPILOT_MIN_CREATION_DATE`). |
 | `REBUILD_MEDALLION_CACHE` | OneLake read cache rebuild (shared with other medallion notebooks). |
 
-Set `COPILOT_CLOSE_MONTH_NO` **before** `%run ./Common/bootstrap` via `sync_copilot_close_month_env`.
+Set `COPILOT_CLOSE_MONTH_NO` **before** `%run ./Common/bootstrap` via `sync_copilot_close_month_env`. There is no separate bronze month string — same knob as Cursor `CURSOR_CLOSE_MONTH_NO`.
+
+**Reads:** Fabric bronze/silver via `read_table_broken_lineage` (deltalake scan + local cache), same as Cursor notebooks.
 
 ## Freeze (`Gold.ingest_freeze_control`)
 
