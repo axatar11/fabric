@@ -259,6 +259,24 @@ def _write_local_cache_schema(cache_dir: Path, spark_schema: "StructType") -> No
     _local_cache_schema_path(cache_dir).write_text(spark_schema.json(), encoding="utf-8")
 
 
+def _dataframe_is_empty(df: DataFrame) -> bool:
+    try:
+        return df.isEmpty()
+    except AttributeError:
+        return df.rdd.isEmpty()
+
+
+def _write_empty_local_parquet_dir(path: Path, spark_schema: "StructType") -> None:
+    """PyArrow empty parquet (Spark coalesce(1) often fails on 0-row plans on Windows)."""
+    import pandas as pd
+
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(parents=True, exist_ok=True)
+    pdf = pd.DataFrame(columns=[f.name for f in spark_schema.fields])
+    _write_pandas_to_parquet_dir(pdf, path, spark_schema=spark_schema)
+
+
 def _read_local_cache_schema(cache_dir: Path) -> "StructType | None":
     import json
 
@@ -495,14 +513,17 @@ def _read_delta_via_deltalake_scan(
                         wipe_cache=wipe_cache,
                     )
                     _read_progress(f"read_table: scan finished ({row_count:,} rows)")
-                    if cache_dir is not None and cache_file_exists(cache_dir):
-                        _mark_cache_complete(cache_dir, row_count)
-                        _read_progress(
-                            f"read_table: opening local parquet cache ({row_count:,} rows) -> {cache_dir}"
-                        )
-                        return _read_parquet_cache_dir(
-                            spark, cache_dir, table_fqn or ""
-                        )
+                    if cache_dir is not None:
+                        if row_count == 0 and not cache_file_exists(cache_dir):
+                            _write_empty_local_parquet_dir(cache_dir, spark_schema)
+                        if cache_file_exists(cache_dir):
+                            _mark_cache_complete(cache_dir, row_count)
+                            _read_progress(
+                                f"read_table: opening local parquet cache ({row_count:,} rows) -> {cache_dir}"
+                            )
+                            return _read_parquet_cache_dir(
+                                spark, cache_dir, table_fqn or ""
+                            )
                     return df
                 except Exception as exc:
                     last_error = exc
@@ -878,6 +899,9 @@ def _write_df_to_local_parquet(
     df: DataFrame, path: Path, *, staging: bool = False
 ) -> None:
     """Materialize locally for cache or merge staging."""
+    if not staging and _dataframe_is_empty(df):
+        _write_empty_local_parquet_dir(path, df.schema)
+        return
     if staging and _use_path_reads():
         if _write_staging_jvm_parquet(df, path):
             return
@@ -1005,7 +1029,6 @@ def read_table(spark: SparkSession, table_fqn: str) -> DataFrame:
             elif backend == "deltalake":
                 df = _read_delta_via_deltalake(spark, path)
             else:
-                cache_dir = None
                 cache_dir = None
                 if _local_table_cache_enabled() and not _skip_auto_cache_on_read():
                     cache_dir = local_cache_path(table_fqn)
