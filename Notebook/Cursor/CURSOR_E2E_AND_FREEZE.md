@@ -31,6 +31,10 @@ Same line in:
 3. Okta silver → HC silver (Oct HC in bronze) → Cursor silver → Gold active → Gold onboard.
 4. Freeze row is appended automatically at end of onboard gold (no manual INSERT unless you skipped onboard).
 
+## Local Windows staging (OOM)
+
+If `publish_merge_staging` fails with **Java heap space** / Spark parquet errors, the silver settings cell already defaults to **`MEDALLION_STAGING_SPARK_PARQUET=0`** (chunked driver collect). Increase **`PYSPARK_DRIVER_MEMORY`** or **`MEDALLION_STAGING_COLLECT_PARTITIONS`** if needed. Do not add `break_lineage_local` before `publish_merge_staging` on the final silver frame.
+
 ## Daily run
 
 **`CURSOR_CLOSE_MONTH_NO = None`** everywhere. Run pipeline as usual.
