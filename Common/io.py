@@ -831,11 +831,15 @@ def _write_df_via_local_iterator_chunks(df: DataFrame, path: Path) -> None:
 
 def _write_spark_parquet_dir(df: DataFrame, path: Path) -> None:
     """JVM parquet to file:// (no Python worker / Arrow collect — safe for large join plans)."""
+    tmp = path.parent / f"{path.name}.__writing__"
+    if tmp.exists():
+        shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    target = tmp.resolve().as_uri()
+    df.write.mode("overwrite").parquet(target)
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
-    path.mkdir(parents=True, exist_ok=True)
-    target = path.resolve().as_uri()
-    df.write.mode("overwrite").parquet(target)
+    tmp.rename(path)
 
 
 def _staging_jvm_partition_counts() -> list[int]:
@@ -1144,6 +1148,12 @@ def merge_staging_path(table_fqn: str) -> Path:
     return Path.home() / ".fabric" / "merge_staging" / safe
 
 
+def transform_staging_path(table_fqn: str) -> Path:
+    """Transform output parquet (merge cell reads this; publish must not wipe it)."""
+    safe = table_fqn.replace(".", "__")
+    return Path.home() / ".fabric" / "transform_staging" / safe
+
+
 def read_table_broken_lineage(
     spark: SparkSession,
     table_fqn: str,
@@ -1212,11 +1222,21 @@ def break_lineage_local(spark: SparkSession, df: DataFrame, label: str) -> DataF
     return spark.read.parquet(str(path))
 
 
-def publish_merge_staging(df: DataFrame, table_fqn: str) -> Path:
-    """Call at end of transform — merge_incremental reads this (no Spark collect on join plan)."""
+def publish_merge_staging(
+    df: DataFrame,
+    table_fqn: str,
+    *,
+    staging_dir: Path | None = None,
+) -> Path:
+    """Materialize ``df`` to local parquet for merge / OneLake writes.
+
+    Use ``transform_staging_path`` (``publish_transform_staging``) at end of transform;
+    ``write_full_table`` / ``merge_incremental`` use ``merge_staging_path`` so month-close
+    republish does not delete the transform batch parquet still referenced in Spark plans.
+    """
     spark = df.sparkSession
     apply_local_merge_spark_conf(spark)
-    path = merge_staging_path(table_fqn)
+    path = staging_dir if staging_dir is not None else merge_staging_path(table_fqn)
     _read_progress(f"publish_merge_staging: {table_fqn} -> {path}")
     if os.environ.get("MEDALLION_PURVIEW_COLLAPSE_BEFORE_PUBLISH", "1").lower() in (
         "1",
@@ -1233,6 +1253,13 @@ def publish_merge_staging(df: DataFrame, table_fqn: str) -> Path:
             df = collapse_lineage_to_local_parquet(spark, df, label)
     _write_df_to_local_parquet(df, path, staging=True)
     return path
+
+
+def publish_transform_staging(df: DataFrame, table_fqn: str) -> Path:
+    """End of transform cell — separate dir from merge publish (Purview split merge cell)."""
+    return publish_merge_staging(
+        df, table_fqn, staging_dir=transform_staging_path(table_fqn)
+    )
 
 
 def _parquet_staging_batches(staging: Path):
@@ -1355,8 +1382,13 @@ def replace_months_in_frame(
         if existing.limit(1).count() > 0:
             kept = existing.filter(~F.col(month_col).cast("int").isin(month_set))
             if month_df.limit(1).count() > 0:
-                return kept.unionByName(month_df, allowMissingColumns=True)
-            return kept
+                out = kept.unionByName(month_df, allowMissingColumns=True)
+            else:
+                out = kept
+            if _use_path_reads():
+                label = f"replace_months_{table_name.rsplit('.', 1)[-1]}"
+                out = collapse_lineage_to_local_parquet(spark, out, label)
+            return out
     except Exception:
         pass
     return month_df
