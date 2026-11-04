@@ -339,9 +339,15 @@ def _scan_batches_to_spark(
     cache_dir: Path | None = None,
 ) -> tuple[DataFrame, int]:
     """Stream deltalake scan batches into Spark (chunked to limit RAM on large tables)."""
+    import time
+
     row_count = 0
     next_progress = 50_000
     chunk_limit = max(10_000, int(os.environ.get("MEDALLION_SCAN_CHUNK_ROWS", "75000")))
+    heartbeat_sec = max(
+        5, int(os.environ.get("MEDALLION_SCAN_HEARTBEAT_SEC", "20"))
+    )
+    last_heartbeat = time.monotonic()
     pending: list = []
     pending_rows = 0
     spark_df: DataFrame | None = None
@@ -378,6 +384,12 @@ def _scan_batches_to_spark(
         pending.append(batch)
         pending_rows += batch.num_rows
         row_count += batch.num_rows
+        now = time.monotonic()
+        if row_count == batch.num_rows or now - last_heartbeat >= heartbeat_sec:
+            _read_progress(
+                f"read_table: scan streaming… {row_count:,} rows from OneLake so far"
+            )
+            last_heartbeat = now
         if row_count >= next_progress:
             _read_debug(f"read_table: scan ... {row_count} rows streamed")
             next_progress += 50_000
@@ -402,8 +414,6 @@ def _read_delta_via_deltalake_scan(
     *,
     cache_dir: Path | None = None,
     table_fqn: str | None = None,
-    scan_predicate: str | None = None,
-    scan_columns: tuple[str, ...] | list[str] | None = None,
 ) -> DataFrame:
     """Azure CLI + deltalake DataFusion scan (column mapping / deletion vectors) -> Spark."""
     import time
@@ -413,15 +423,16 @@ def _read_delta_via_deltalake_scan(
     from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
     max_retries = max(1, int(os.environ.get("MEDALLION_SCAN_RETRIES", "6")))
-    max_transport = max(1, int(os.environ.get("MEDALLION_SCAN_TRANSPORT_RETRIES", "2")))
-    transport_failures = 0
     last_error: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            force_token = attempt > 1 and transport_failures == 0
+            force_token = attempt > 1
             refresh_abfs_token_env(force=force_token)
             opts = fabric_storage_options(force=force_token)
-            _read_debug(f"read_table: deltalake scan {path} (attempt {attempt}/{max_retries})")
+            _read_progress(
+                f"read_table: deltalake scan {path[:80]}… "
+                f"(attempt {attempt}/{max_retries})"
+            )
             limit = opts.get("OBJECT_STORE_CONCURRENCY_LIMIT")
             if limit:
                 _read_progress(
@@ -430,22 +441,15 @@ def _read_delta_via_deltalake_scan(
                 )
             dt = DeltaTable(path, storage_options=opts)
             spark_schema = _deltalake_schema_to_spark(dt)
-            scan_kwargs: dict = {}
-            if scan_predicate:
-                scan_kwargs["predicate"] = scan_predicate
-                _read_progress(f"read_table: scan predicate={scan_predicate!r}")
-            if scan_columns:
-                scan_kwargs["columns"] = list(scan_columns)
-                _read_progress(f"read_table: scan column projection ({len(scan_columns)} cols)")
-            _read_debug("read_table: deltalake scan() streaming batches...")
-            reader = dt.scan(**scan_kwargs) if scan_kwargs else dt.scan()
+            _read_progress("read_table: deltalake scan() streaming batches…")
+            reader = dt.scan()
             df, row_count = _scan_batches_to_spark(
                 spark, reader, spark_schema, cache_dir=cache_dir
             )
-            _read_debug(f"read_table: scan -> Spark ({row_count} rows)")
+            _read_progress(f"read_table: scan finished ({row_count:,} rows)")
             if cache_dir is not None and cache_file_exists(cache_dir):
                 _read_progress(
-                    f"read_table: opening local parquet cache ({row_count} rows) -> {cache_dir}"
+                    f"read_table: opening local parquet cache ({row_count:,} rows) -> {cache_dir}"
                 )
                 return _read_parquet_cache_dir(
                     spark, cache_dir, table_fqn or ""
@@ -461,38 +465,24 @@ def _read_delta_via_deltalake_scan(
                 )
             if not _scan_retriable_error(exc):
                 raise
-            is_transport = _scan_error_is_transport(exc)
-            if is_transport:
-                transport_failures += 1
-                _read_progress(
-                    f"read_table: OneLake transport error "
-                    f"(attempt {attempt}/{max_retries}, will retry)"
-                )
+            if _scan_error_is_transport(exc):
+                cache_hint = ""
+                if cache_dir is not None and cache_file_exists(cache_dir):
+                    cache_hint = (
+                        f"\nPartial parquet at {cache_dir} — remove it or replace with a full cache."
+                    )
+                raise RuntimeError(
+                    "OneLake parquet download failed (HTTP body/connect error). "
+                    "Not fixed by az login.\n"
+                    f"Error: {exc!s}\n"
+                    f"Use local cache under {Path.home() / '.fabric' / 'medallion_cache'}"
+                    f"{cache_hint}\n"
+                    "No scan retry loop. Seed cache from Fabric, or set "
+                    "MEDILLION_ALLOW_ONELAKE_SCAN=1 once when OneLake is stable."
+                ) from exc
             if attempt >= max_retries:
-                if is_transport:
-                    cache_hint = ""
-                    if cache_dir is not None and cache_file_exists(cache_dir):
-                        cache_hint = (
-                            f"\nPartial cache at {cache_dir} — delete that folder, "
-                            "set REBUILD_MEDALLION_CACHE=True, and re-run; "
-                            "or use a narrower scan_predicate (month-close / min date)."
-                        )
-                    raise RuntimeError(
-                        "OneLake parquet download failed after retries "
-                        "(HTTP/connect error; az login alone may not fix).\n"
-                        f"Error: {exc!s}\n"
-                        f"Cache root: {Path.home() / '.fabric' / 'medallion_cache'}"
-                        f"{cache_hint}\n"
-                        "Tips: lower load with copilot bronze scan_predicate; "
-                        "set MEDALLION_OBJECT_STORE_CONCURRENCY=1; retry when network is stable."
-                    ) from exc
                 raise
             wait = min(2**attempt, 15)
-            if is_transport:
-                wait = max(
-                    wait,
-                    int(os.environ.get("MEDALLION_SCAN_TRANSPORT_WAIT_SEC", "25")),
-                )
             _read_debug(
                 f"read_table: scan failed ({exc!s}); refresh token and retry in {wait}s..."
             )
@@ -547,12 +537,12 @@ def _local_cache_refresh() -> bool:
 def sync_rebuild_medallion_cache_env(rebuild: bool) -> None:
     """Notebook knob: True = scan OneLake and refresh local cache; False = use cache."""
     os.environ["MEDALLION_LOCAL_TABLE_CACHE"] = "1"
-    os.environ["MEDALLION_SCAN_RETRIES"] = "1"
-    os.environ["MEDALLION_SCAN_TRANSPORT_RETRIES"] = "1"
     if rebuild:
         os.environ["MEDALLION_CACHE_REFRESH"] = "1"
+        os.environ.setdefault("MEDALLION_SCAN_RETRIES", "6")
     else:
         os.environ.pop("MEDALLION_CACHE_REFRESH", None)
+        os.environ.setdefault("MEDALLION_SCAN_RETRIES", "1")
 
 
 def cache_file_exists(cache_dir: Path) -> bool:
