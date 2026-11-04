@@ -11,7 +11,7 @@ Same patterns as Cursor silver/gold.
 
 Set `COPILOT_CLOSE_MONTH_NO` **before** `%run ./Common/bootstrap` via `sync_copilot_close_month_env`. There is no separate bronze month string — same knob as Cursor `CURSOR_CLOSE_MONTH_NO`.
 
-**Reads:** Fabric bronze/silver via `read_table_broken_lineage` (full-table deltalake scan + local cache, then Spark filters). Transient HTTP errors retry automatically; if a read fails mid-cache, delete the table folder under `~/.fabric/medallion_cache/` and re-run with `REBUILD_MEDALLION_CACHE=True`.
+**Reads:** Fabric bronze/silver via `read_table_broken_lineage` (full-table deltalake scan + local cache, then Spark filters). First OneLake scan can take several minutes with `MEDALLION_OBJECT_STORE_CONCURRENCY=1`; the Purview notebook defaults concurrency to `4` and `REBUILD_MEDALLION_CACHE=False` after the cache exists. Scan logs heartbeat every ~20s while rows stream. On HTTP body errors, delete partial cache and retry; transport failures fail fast (no long retry loop).
 
 ## Freeze (`Gold.ingest_freeze_control`)
 
