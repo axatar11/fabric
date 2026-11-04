@@ -393,6 +393,30 @@ def _calendar_month_end_exclusive(yyyy_mm: str) -> str:
     return f"{year}-{month + 1:02d}-01"
 
 
+def copilot_bronze_scan_predicate(
+    close_month_no: int | None = None,
+    *,
+    filenames: list[str] | None = None,
+) -> str | None:
+    """OneLake scan filter for Purview bronze (month-close or daily min CreationDate)."""
+    from Common import config
+    import os
+
+    if close_month_no is not None:
+        year, month = divmod(int(close_month_no), 100)
+        return purview_copilot_bronze_scan_predicate(
+            creation_month=f"{year}-{month:02d}",
+            filenames=filenames,
+        )
+    return purview_copilot_bronze_scan_predicate(
+        min_creation_date=os.environ.get(
+            "MEDALLION_PURVIEW_MIN_CREATION_DATE",
+            config.PURVIEW_COPILOT_MIN_CREATION_DATE,
+        ),
+        filenames=filenames,
+    )
+
+
 def purview_copilot_bronze_scan_predicate(
     *,
     creation_month: str | None = None,
