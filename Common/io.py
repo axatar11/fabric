@@ -57,6 +57,9 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_PURVIEW_COPILOT_SILVER: onelake_table_path(
             med, "Silver/purview_copilot_usage"
         ),
+        config.TABLE_PURVIEW_COPILOT_OKTA_REJECT: onelake_table_path(
+            med, "Silver/purview_copilot_usage_okta_reject"
+        ),
     }
     active_fqn = getattr(
         config, "TABLE_FACT_CURSOR_ACTIVE", _default_gold_table_fqn("fact_cursor_active")
@@ -996,6 +999,20 @@ def cursor_close_month_no() -> int | None:
     return parse_process_month_no(raw or None)
 
 
+def sync_copilot_close_month_env(month_no: int | None) -> None:
+    """Set env from notebook ``COPILOT_CLOSE_MONTH_NO`` before ``%run bootstrap``."""
+    if month_no is not None:
+        os.environ["MEDALLION_COPILOT_CLOSE_MONTH_NO"] = str(int(month_no))
+    else:
+        os.environ.pop("MEDALLION_COPILOT_CLOSE_MONTH_NO", None)
+
+
+def copilot_close_month_no() -> int | None:
+    """Active month-close YYYYMM from env (``MEDALLION_COPILOT_CLOSE_MONTH_NO``)."""
+    raw = os.environ.get("MEDALLION_COPILOT_CLOSE_MONTH_NO", "").strip()
+    return parse_process_month_no(raw or None)
+
+
 def replace_months_in_frame(
     spark: SparkSession,
     table_name: str,
@@ -1051,14 +1068,37 @@ def write_cursor_okta_rejects(
     write_full_table(out, target)
 
 
-def append_cursor_freeze_month(
+def read_ingest_frozen_month_nos(spark: SparkSession, product: str) -> list[int]:
+    """``Month_No`` from ``ingest_freeze_control`` for ``product`` or ``all``."""
+    from Common import config
+    from pyspark.sql import functions as F
+
+    product_key = product.strip().lower()
+    try:
+        df = read_table(spark, config.TABLE_INGEST_FREEZE_CONTROL)
+    except Exception:
+        return []
+    if df.limit(1).count() == 0:
+        return []
+    rows = (
+        df.filter(F.lower(F.col("product")).isin(product_key, "all"))
+        .select(F.col("Month_No").cast("int").alias("_m"))
+        .where(F.col("_m").isNotNull())
+        .distinct()
+        .collect()
+    )
+    return sorted(int(r["_m"]) for r in rows)
+
+
+def append_ingest_freeze_month(
     spark: SparkSession,
+    product: str,
     month_no: int,
     *,
-    frozen_by: str = "cursor_pipeline",
+    frozen_by: str | None = None,
     notes: str = "Month-close auto-freeze",
 ) -> None:
-    """Append ``ingest_freeze_control`` row for Cursor (skip if already frozen)."""
+    """Append ``ingest_freeze_control`` row (skip if that product/month already frozen)."""
     from datetime import datetime, timezone
 
     import pandas as pd
@@ -1067,14 +1107,19 @@ def append_cursor_freeze_month(
     from Common import config
     from Common.fabric_storage import fabric_storage_options, refresh_abfs_token_env
 
-    if month_no in read_cursor_frozen_month_nos(spark):
-        _read_progress(f"freeze: Month_No {month_no} already in ingest_freeze_control — skip")
+    product_key = product.strip().lower()
+    if frozen_by is None:
+        frozen_by = f"{product_key}_pipeline"
+    if month_no in read_ingest_frozen_month_nos(spark, product_key):
+        _read_progress(
+            f"freeze: {product_key} Month_No {month_no} already in ingest_freeze_control — skip"
+        )
         return
     ts = datetime.now(timezone.utc)
     pdf = pd.DataFrame(
         [
             {
-                "product": "cursor",
+                "product": product_key,
                 "Month_No": int(month_no),
                 "frozen_at": ts,
                 "frozen_by": frozen_by,
@@ -1088,7 +1133,7 @@ def append_cursor_freeze_month(
         opts = fabric_storage_options()
         exists = _deltalake_table_exists(path)
         _read_progress(
-            f"freeze: deltalake append Month_No {month_no} "
+            f"freeze: deltalake append {product_key} Month_No {month_no} "
             f"({'append' if exists else 'create'})"
         )
         write_deltalake(
@@ -1103,7 +1148,7 @@ def append_cursor_freeze_month(
         df = spark.createDataFrame(
             [
                 Row(
-                    product="cursor",
+                    product=product_key,
                     Month_No=int(month_no),
                     frozen_at=ts,
                     frozen_by=frozen_by,
@@ -1112,7 +1157,33 @@ def append_cursor_freeze_month(
             ]
         )
         append_table(df, config.TABLE_INGEST_FREEZE_CONTROL)
-    _read_progress(f"freeze: appended Month_No {month_no} to ingest_freeze_control")
+    _read_progress(f"freeze: appended {product_key} Month_No {month_no} to ingest_freeze_control")
+
+
+def append_cursor_freeze_month(
+    spark: SparkSession,
+    month_no: int,
+    *,
+    frozen_by: str = "cursor_pipeline",
+    notes: str = "Month-close auto-freeze",
+) -> None:
+    """Append ``ingest_freeze_control`` row for Cursor (skip if already frozen)."""
+    append_ingest_freeze_month(
+        spark, "cursor", month_no, frozen_by=frozen_by, notes=notes
+    )
+
+
+def append_copilot_freeze_month(
+    spark: SparkSession,
+    month_no: int,
+    *,
+    frozen_by: str = "copilot_pipeline",
+    notes: str = "Month-close auto-freeze",
+) -> None:
+    """Append ``ingest_freeze_control`` row for Copilot (skip if already frozen)."""
+    append_ingest_freeze_month(
+        spark, "copilot", month_no, frozen_by=frozen_by, notes=notes
+    )
 
 
 def _distinct_month_nos(df: DataFrame, month_col: str) -> list[int]:
@@ -1129,23 +1200,22 @@ def _distinct_month_nos(df: DataFrame, month_col: str) -> list[int]:
 
 def read_cursor_frozen_month_nos(spark: SparkSession) -> list[int]:
     """``Month_No`` values from ``ingest_freeze_control`` for ``cursor`` or ``all``."""
-    from Common import config
-    from pyspark.sql import functions as F
+    return read_ingest_frozen_month_nos(spark, "cursor")
 
-    try:
-        df = read_table(spark, config.TABLE_INGEST_FREEZE_CONTROL)
-    except Exception:
-        return []
-    if df.limit(1).count() == 0:
-        return []
-    rows = (
-        df.filter(F.lower(F.col("product")).isin("cursor", "all"))
-        .select(F.col("Month_No").cast("int").alias("_m"))
-        .where(F.col("_m").isNotNull())
-        .distinct()
-        .collect()
-    )
-    return sorted(int(r["_m"]) for r in rows)
+
+def read_copilot_frozen_month_nos(spark: SparkSession) -> list[int]:
+    """``Month_No`` values from ``ingest_freeze_control`` for ``copilot`` or ``all``."""
+    return read_ingest_frozen_month_nos(spark, "copilot")
+
+
+def _frozen_month_nos_to_skip(
+    frozen: list[int],
+    close_month_no: int | None = None,
+) -> list[int]:
+    if close_month_no is not None:
+        close = int(close_month_no)
+        frozen = [m for m in frozen if m != close]
+    return frozen
 
 
 def cursor_frozen_month_nos_to_skip(
@@ -1157,11 +1227,15 @@ def cursor_frozen_month_nos_to_skip(
     When ``close_month_no`` is set (month-close), that month may still be reloaded even if
     already listed in ``ingest_freeze_control``.
     """
-    frozen = read_cursor_frozen_month_nos(spark)
-    if close_month_no is not None:
-        close = int(close_month_no)
-        frozen = [m for m in frozen if m != close]
-    return frozen
+    return _frozen_month_nos_to_skip(read_cursor_frozen_month_nos(spark), close_month_no)
+
+
+def copilot_frozen_month_nos_to_skip(
+    spark: SparkSession,
+    close_month_no: int | None = None,
+) -> list[int]:
+    """Copilot frozen months to skip on daily silver/gold (month-close may reload close month)."""
+    return _frozen_month_nos_to_skip(read_copilot_frozen_month_nos(spark), close_month_no)
 
 
 def cursor_excluded_month_nos(
@@ -1178,6 +1252,45 @@ def cursor_excluded_month_nos(
     batch_months = _distinct_month_nos(batch_df, month_col)
     batch_max = max(batch_months) if batch_months else None
     return excluded, batch_max
+
+
+def copilot_excluded_month_nos(
+    spark: SparkSession,
+    gold_table: str,
+    batch_df: DataFrame,
+    month_col: str = "Month_No",
+    *,
+    close_month_no: int | None = None,
+) -> tuple[list[int], int | None]:
+    """Copilot gold merge skip list from ``ingest_freeze_control``."""
+    _ = gold_table
+    excluded = copilot_frozen_month_nos_to_skip(spark, close_month_no)
+    batch_months = _distinct_month_nos(batch_df, month_col)
+    batch_max = max(batch_months) if batch_months else None
+    return excluded, batch_max
+
+
+def write_copilot_okta_rejects(
+    spark: SparkSession,
+    rejects_df: DataFrame,
+    processed_month_nos: list[int],
+    *,
+    table_name: str | None = None,
+) -> None:
+    """Replace copilot reject rows for months in this batch."""
+    from Common import config
+
+    if not processed_month_nos:
+        return
+    target = table_name or config.TABLE_PURVIEW_COPILOT_OKTA_REJECT
+    out = replace_months_in_frame(
+        spark,
+        target,
+        rejects_df,
+        "purview_copilot_usage_month_no",
+        processed_month_nos,
+    )
+    write_full_table(out, target)
 
 
 def append_table(df: DataFrame, table_name: str) -> None:
@@ -1241,22 +1354,21 @@ def write_full_table(df: DataFrame | None, table_name: str) -> None:
     writer.saveAsTable(table_name)
 
 
-def write_cursor_silver_daily(
+def _write_silver_daily_preserve_frozen(
     spark: SparkSession,
     write_df: DataFrame,
     table_name: str,
     merge_key: str,
+    month_col: str,
+    frozen: list[int],
     *,
-    close_month_no: int | None = None,
+    product_label: str,
 ) -> None:
-    """Daily cursor silver: merge when nothing frozen; else keep frozen months from target (like HC)."""
     from pyspark.sql import functions as F
 
-    frozen = cursor_frozen_month_nos_to_skip(spark, close_month_no)
     if not frozen:
         merge_incremental(spark, write_df, table_name, merge_key)
         return
-    month_col = "CursorUsageMonthNo"
     out = write_df
     try:
         existing = read_table(spark, table_name)
@@ -1268,8 +1380,50 @@ def write_cursor_silver_daily(
                 out = kept
     except Exception:
         pass
-    _read_progress(f"cursor silver daily: preserved frozen Month_No {frozen}")
+    _read_progress(f"{product_label} silver daily: preserved frozen Month_No {frozen}")
     write_full_table(out, table_name)
+
+
+def write_cursor_silver_daily(
+    spark: SparkSession,
+    write_df: DataFrame,
+    table_name: str,
+    merge_key: str,
+    *,
+    close_month_no: int | None = None,
+) -> None:
+    """Daily cursor silver: merge when nothing frozen; else keep frozen months from target (like HC)."""
+    frozen = cursor_frozen_month_nos_to_skip(spark, close_month_no)
+    _write_silver_daily_preserve_frozen(
+        spark,
+        write_df,
+        table_name,
+        merge_key,
+        "CursorUsageMonthNo",
+        frozen,
+        product_label="cursor",
+    )
+
+
+def write_copilot_silver_daily(
+    spark: SparkSession,
+    write_df: DataFrame,
+    table_name: str,
+    merge_key: str,
+    *,
+    close_month_no: int | None = None,
+) -> None:
+    """Daily copilot silver: merge open months; preserve frozen months already in target."""
+    frozen = copilot_frozen_month_nos_to_skip(spark, close_month_no)
+    _write_silver_daily_preserve_frozen(
+        spark,
+        write_df,
+        table_name,
+        merge_key,
+        "purview_copilot_usage_month_no",
+        frozen,
+        product_label="copilot",
+    )
 
 
 def merge_incremental(spark, df: DataFrame, table_name: str, merge_key: str) -> None:

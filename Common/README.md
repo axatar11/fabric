@@ -75,7 +75,10 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`with_normalized_country(df, …)`** | Left join lookup; default `No Country`. |
 | **`join_okta_for_cursor_usage` / `join_hc_for_cursor_usage`** | Equi-join helpers (optional; cursor_usage silver notebook inlines joins). |
 | **`cursor_usage_record_key()`** | SHA2 merge key for **silver** cursor_usage rows. |
-| **`build_purview_copilot_usage_silver(...)`** | Bronze **purview_copilot_usage** → silver (audit JSON, Okta inner join, HC left join). |
+| **`build_purview_copilot_usage_silver(...)`** | Bronze **purview_copilot_usage** → `(silver, okta_rejects)` (Okta match only in silver; HC left join). |
+| **`write_copilot_okta_rejects` / `write_copilot_silver_daily`** | Same month-replace / frozen-month preserve pattern as Cursor for Copilot silver. |
+| **`copilot_frozen_month_nos_to_skip` / `copilot_excluded_month_nos`** | Read `ingest_freeze_control` for `product` copilot or all. |
+| **`append_copilot_freeze_month`** | Append copilot freeze row after month-close gold. |
 | **`purview_active_copilot_aggregate` / `purview_active_copilot_merge_key`** | Gold **fact_copilot_active** grain (sum prompts, Request >= 1). |
 | **`purview_copilot_use_case_code`** | Interaction type → `UC-9007-COP-*` use case code. |
 | **`cursor_active_daily_aggregate(silver)`** | Gold active: group by date + Okta user, `COUNT(*)` Request. |

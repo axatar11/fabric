@@ -319,8 +319,18 @@ def _notebook_reload_io_helpers(
     ng["replace_months_in_frame"] = io.replace_months_in_frame
     ng["write_cursor_okta_rejects"] = io.write_cursor_okta_rejects
     ng["write_cursor_silver_daily"] = io.write_cursor_silver_daily
+    ng["read_ingest_frozen_month_nos"] = io.read_ingest_frozen_month_nos
+    ng["read_copilot_frozen_month_nos"] = io.read_copilot_frozen_month_nos
+    ng["copilot_frozen_month_nos_to_skip"] = io.copilot_frozen_month_nos_to_skip
+    ng["copilot_excluded_month_nos"] = io.copilot_excluded_month_nos
+    ng["sync_copilot_close_month_env"] = io.sync_copilot_close_month_env
+    ng["copilot_close_month_no"] = io.copilot_close_month_no
+    ng["append_copilot_freeze_month"] = io.append_copilot_freeze_month
+    ng["write_copilot_okta_rejects"] = io.write_copilot_okta_rejects
+    ng["write_copilot_silver_daily"] = io.write_copilot_silver_daily
     ng["_distinct_month_nos"] = io._distinct_month_nos
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
+    ng["split_purview_okta_join"] = transforms.split_purview_okta_join
     ng["exclude_month_nos"] = transforms.exclude_month_nos
     ng["save_table_cache"] = io.save_table_cache
     ng["load_table_cache"] = lambda name: io.load_table_cache(spark, name)
@@ -386,6 +396,15 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "replace_months_in_frame": io.replace_months_in_frame,
             "write_cursor_okta_rejects": io.write_cursor_okta_rejects,
             "write_cursor_silver_daily": io.write_cursor_silver_daily,
+            "read_ingest_frozen_month_nos": io.read_ingest_frozen_month_nos,
+            "read_copilot_frozen_month_nos": io.read_copilot_frozen_month_nos,
+            "copilot_frozen_month_nos_to_skip": io.copilot_frozen_month_nos_to_skip,
+            "copilot_excluded_month_nos": io.copilot_excluded_month_nos,
+            "sync_copilot_close_month_env": io.sync_copilot_close_month_env,
+            "copilot_close_month_no": io.copilot_close_month_no,
+            "append_copilot_freeze_month": io.append_copilot_freeze_month,
+            "write_copilot_okta_rejects": io.write_copilot_okta_rejects,
+            "write_copilot_silver_daily": io.write_copilot_silver_daily,
             "_distinct_month_nos": io._distinct_month_nos,
             "apply_local_merge_spark_conf": io.apply_local_merge_spark_conf,
             "break_lineage_local": _bind_break_lineage_local(spark),
@@ -397,6 +416,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "with_normalized_country": transforms.with_normalized_country,
             "cursor_usage_record_key": transforms.cursor_usage_record_key,
             "split_cursor_okta_join": transforms.split_cursor_okta_join,
+            "split_purview_okta_join": transforms.split_purview_okta_join,
             "exclude_month_nos": transforms.exclude_month_nos,
             "cursor_active_daily_aggregate": transforms.cursor_active_daily_aggregate,
             "cursor_active_daily_merge_key": transforms.cursor_active_daily_merge_key,
@@ -417,6 +437,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
         if hasattr(config, name):
             notebook_globals[name] = getattr(config, name)
     notebook_globals["CURSOR_CLOSE_MONTH_NO"] = io.cursor_close_month_no()
+    notebook_globals["COPILOT_CLOSE_MONTH_NO"] = io.copilot_close_month_no()
     if "TABLE_FACT_CURSOR_ONBOARD" not in notebook_globals:
         notebook_globals["TABLE_FACT_CURSOR_ONBOARD"] = (
             f"{config.GOLD_DATABASE}.{config.GOLD_SCHEMA}.fact_cursor_onboard"
