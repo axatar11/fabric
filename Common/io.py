@@ -402,6 +402,8 @@ def _read_delta_via_deltalake_scan(
     *,
     cache_dir: Path | None = None,
     table_fqn: str | None = None,
+    scan_predicate: str | None = None,
+    scan_columns: tuple[str, ...] | list[str] | None = None,
 ) -> DataFrame:
     """Azure CLI + deltalake DataFusion scan (column mapping / deletion vectors) -> Spark."""
     import time
@@ -428,8 +430,15 @@ def _read_delta_via_deltalake_scan(
                 )
             dt = DeltaTable(path, storage_options=opts)
             spark_schema = _deltalake_schema_to_spark(dt)
+            scan_kwargs: dict = {}
+            if scan_predicate:
+                scan_kwargs["predicate"] = scan_predicate
+                _read_progress(f"read_table: scan predicate={scan_predicate!r}")
+            if scan_columns:
+                scan_kwargs["columns"] = list(scan_columns)
+                _read_progress(f"read_table: scan column projection ({len(scan_columns)} cols)")
             _read_debug("read_table: deltalake scan() streaming batches...")
-            reader = dt.scan()
+            reader = dt.scan(**scan_kwargs) if scan_kwargs else dt.scan()
             df, row_count = _scan_batches_to_spark(
                 spark, reader, spark_schema, cache_dir=cache_dir
             )
@@ -452,24 +461,38 @@ def _read_delta_via_deltalake_scan(
                 )
             if not _scan_retriable_error(exc):
                 raise
-            if _scan_error_is_transport(exc):
-                cache_hint = ""
-                if cache_dir is not None and cache_file_exists(cache_dir):
-                    cache_hint = (
-                        f"\nPartial parquet at {cache_dir} — remove it or replace with a full cache."
-                    )
-                raise RuntimeError(
-                    "OneLake parquet download failed (HTTP body/connect error). "
-                    "Not fixed by az login.\n"
-                    f"Error: {exc!s}\n"
-                    f"Use local cache under {Path.home() / '.fabric' / 'medallion_cache'}"
-                    f"{cache_hint}\n"
-                    "No scan retry loop. Seed cache from Fabric, or set "
-                    "MEDILLION_ALLOW_ONELAKE_SCAN=1 once when OneLake is stable."
-                ) from exc
+            is_transport = _scan_error_is_transport(exc)
+            if is_transport:
+                transport_failures += 1
+                _read_progress(
+                    f"read_table: OneLake transport error "
+                    f"(attempt {attempt}/{max_retries}, will retry)"
+                )
             if attempt >= max_retries:
+                if is_transport:
+                    cache_hint = ""
+                    if cache_dir is not None and cache_file_exists(cache_dir):
+                        cache_hint = (
+                            f"\nPartial cache at {cache_dir} — delete that folder, "
+                            "set REBUILD_MEDALLION_CACHE=True, and re-run; "
+                            "or use a narrower scan_predicate (month-close / min date)."
+                        )
+                    raise RuntimeError(
+                        "OneLake parquet download failed after retries "
+                        "(HTTP/connect error; az login alone may not fix).\n"
+                        f"Error: {exc!s}\n"
+                        f"Cache root: {Path.home() / '.fabric' / 'medallion_cache'}"
+                        f"{cache_hint}\n"
+                        "Tips: lower load with copilot bronze scan_predicate; "
+                        "set MEDALLION_OBJECT_STORE_CONCURRENCY=1; retry when network is stable."
+                    ) from exc
                 raise
             wait = min(2**attempt, 15)
+            if is_transport:
+                wait = max(
+                    wait,
+                    int(os.environ.get("MEDALLION_SCAN_TRANSPORT_WAIT_SEC", "25")),
+                )
             _read_debug(
                 f"read_table: scan failed ({exc!s}); refresh token and retry in {wait}s..."
             )
@@ -854,11 +877,6 @@ def read_table_broken_lineage(
     scan_columns: tuple[str, ...] | list[str] | None = None,
 ) -> DataFrame:
     """``read_table`` then materialize for joins — prefer local cache parquet over ``break_lineage`` collect."""
-    if scan_predicate or scan_columns:
-        _read_progress(
-            "read_table_broken_lineage: ignoring scan_predicate/scan_columns — "
-            "use local medallion_cache + CreationDate filters in transform (avoid onelake.blob scoped scan)."
-        )
     cache_path = local_cache_path(table_fqn)
     lake_path = delta_path_for_table(table_fqn)
     scan_backend = bool(
@@ -879,7 +897,12 @@ def read_table_broken_lineage(
         if _local_cache_refresh() or not cache_file_exists(cache_path):
             _read_progress(f"read_table_broken_lineage: scan -> local cache ({table_fqn})")
             _read_delta_via_deltalake_scan(
-                spark, lake_path, cache_dir=cache_path, table_fqn=table_fqn
+                spark,
+                lake_path,
+                cache_dir=cache_path,
+                table_fqn=table_fqn,
+                scan_predicate=scan_predicate,
+                scan_columns=scan_columns,
             )
             if cache_file_exists(cache_path):
                 _read_progress(

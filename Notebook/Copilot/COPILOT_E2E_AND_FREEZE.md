@@ -11,7 +11,7 @@ Same patterns as Cursor silver/gold.
 
 Set `COPILOT_CLOSE_MONTH_NO` **before** `%run ./Common/bootstrap` via `sync_copilot_close_month_env`. There is no separate bronze month string — same knob as Cursor `CURSOR_CLOSE_MONTH_NO`.
 
-**Reads:** Fabric bronze/silver via `read_table_broken_lineage` (deltalake scan + local cache), same as Cursor notebooks.
+**Reads:** Fabric bronze/silver via `read_table_broken_lineage` (deltalake scan + local cache). Purview bronze uses **`copilot_bronze_scan_predicate`** (month-close or min `CreationDate`) and column projection to limit OneLake downloads. Transient HTTP errors retry automatically; if a read fails mid-cache, delete the table folder under `~/.fabric/medallion_cache/` and re-run with `REBUILD_MEDALLION_CACHE=True`.
 
 ## Freeze (`Gold.ingest_freeze_control`)
 
