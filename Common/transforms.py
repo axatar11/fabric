@@ -445,16 +445,14 @@ def purview_copilot_bronze_scan_predicate(
     return " AND ".join(f"({part})" for part in clauses)
 
 
-def build_purview_copilot_usage_silver(
+def parse_purview_copilot_bronze_base(
     bronze: DataFrame,
-    okta: DataFrame,
-    hc: DataFrame,
     *,
     min_creation_date: str,
     close_month_no: int | None = None,
     frozen_month_nos: list[int] | None = None,
-) -> tuple[DataFrame, DataFrame]:
-    """Bronze purview_copilot_usage → (silver with Okta match, Okta rejects)."""
+) -> DataFrame:
+    """Bronze → parsed row shape (AuditData JSON expanded; no Okta/HC joins)."""
     audit = _bronze_column(bronze, "AuditData", "audit_data")
     record_id = _bronze_column(bronze, "RecordId", "record_id")
     creation = F.to_timestamp(F.trim(_bronze_column(bronze, "CreationDate", "creation_date")))
@@ -618,6 +616,25 @@ def build_purview_copilot_usage_silver(
         ).cast("int"),
     )
 
+    base = filter_to_month_no(base, "purview_copilot_usage_month_no", close_month_no)
+    base = filter_through_close_month_ts(
+        base, "purview_copilot_usage_date", close_month_no
+    )
+    if frozen_month_nos:
+        base = exclude_month_nos(
+            base, "purview_copilot_usage_month_no", frozen_month_nos
+        )
+    return base
+
+
+def join_purview_copilot_to_silver(
+    base: DataFrame,
+    okta: DataFrame,
+    hc: DataFrame,
+    *,
+    close_month_no: int | None = None,
+) -> tuple[DataFrame, DataFrame]:
+    """Parsed Purview base + Okta/HC silver → (silver, Okta rejects)."""
     okta_slim = okta.select(
         F.col("OktaUserId"),
         F.lower(F.trim(F.col("OktaUserEmail"))).alias("OktaUserEmail"),
@@ -627,15 +644,6 @@ def build_purview_copilot_usage_silver(
         F.col("OktaUserRegion"),
         F.col("OktaUserCountry"),
     )
-    base = filter_to_month_no(base, "purview_copilot_usage_month_no", close_month_no)
-    base = filter_through_close_month_ts(
-        base, "purview_copilot_usage_date", close_month_no
-    )
-    if frozen_month_nos:
-        base = exclude_month_nos(
-            base, "purview_copilot_usage_month_no", frozen_month_nos
-        )
-
     joined, okta_rejects = split_purview_okta_join(
         base,
         okta_slim,
@@ -741,6 +749,27 @@ def build_purview_copilot_usage_silver(
         F.col("HCDivisionINC").alias("hc_division_inc"),
     )
     return silver, okta_rejects
+
+
+def build_purview_copilot_usage_silver(
+    bronze: DataFrame,
+    okta: DataFrame,
+    hc: DataFrame,
+    *,
+    min_creation_date: str,
+    close_month_no: int | None = None,
+    frozen_month_nos: list[int] | None = None,
+) -> tuple[DataFrame, DataFrame]:
+    """Bronze purview_copilot_usage → (silver with Okta match, Okta rejects)."""
+    base = parse_purview_copilot_bronze_base(
+        bronze,
+        min_creation_date=min_creation_date,
+        close_month_no=close_month_no,
+        frozen_month_nos=frozen_month_nos,
+    )
+    return join_purview_copilot_to_silver(
+        base, okta, hc, close_month_no=close_month_no
+    )
 
 
 def purview_copilot_use_case_code(interaction_type: Column) -> Column:

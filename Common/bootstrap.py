@@ -154,6 +154,11 @@ def _build_spark(app_name: str):
     if io._use_path_reads():
         fabric_storage.refresh_abfs_token_env()
     builder = SparkSession.builder.appName(app_name)
+    driver_mem = os.environ.get("PYSPARK_DRIVER_MEMORY")
+    if driver_mem:
+        builder = builder.config("spark.driver.memory", driver_mem).config(
+            "spark.executor.memory", driver_mem
+        )
     if io._use_path_reads():
         builder = builder.config("spark.jars", fabric_storage.onelake_cli_token_jar())
     builder = (
@@ -332,6 +337,9 @@ def _notebook_reload_io_helpers(
     ng["split_cursor_okta_join"] = transforms.split_cursor_okta_join
     ng["split_purview_okta_join"] = transforms.split_purview_okta_join
     ng["purview_copilot_min_creation_date"] = transforms.purview_copilot_min_creation_date
+    ng["parse_purview_copilot_bronze_base"] = transforms.parse_purview_copilot_bronze_base
+    ng["join_purview_copilot_to_silver"] = transforms.join_purview_copilot_to_silver
+    ng["collapse_lineage_to_local_parquet"] = io.collapse_lineage_to_local_parquet
     ng["copilot_bronze_scan_predicate"] = transforms.copilot_bronze_scan_predicate
     ng["exclude_month_nos"] = transforms.exclude_month_nos
     ng["save_table_cache"] = io.save_table_cache
@@ -427,6 +435,9 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "cursor_onboard_daily_dedupe": transforms.cursor_onboard_daily_dedupe,
             "cursor_onboard_merge_key": transforms.cursor_onboard_merge_key,
             "build_purview_copilot_usage_silver": transforms.build_purview_copilot_usage_silver,
+            "parse_purview_copilot_bronze_base": transforms.parse_purview_copilot_bronze_base,
+            "join_purview_copilot_to_silver": transforms.join_purview_copilot_to_silver,
+            "collapse_lineage_to_local_parquet": io.collapse_lineage_to_local_parquet,
             "purview_copilot_min_creation_date": transforms.purview_copilot_min_creation_date,
             "copilot_bronze_scan_predicate": transforms.copilot_bronze_scan_predicate,
             "purview_copilot_bronze_scan_predicate": transforms.purview_copilot_bronze_scan_predicate,
