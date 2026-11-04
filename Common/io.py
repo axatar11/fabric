@@ -823,19 +823,22 @@ def _staging_jvm_partition_counts() -> list[int]:
         int(
             os.environ.get(
                 "MEDALLION_COLLAPSE_PARTITIONS",
-                os.environ.get("MEDALLION_STAGING_WRITE_PARTITIONS", "8"),
+                os.environ.get(
+                    "MEDALLION_STAGING_WRITE_PARTITIONS",
+                    str(max(8, _staging_write_partitions())),
+                ),
             )
         ),
     )
     counts: list[int] = []
-    for n in (start, max(start * 2, 16), 32):
+    for n in (start, max(start * 2, 16), 32, 64):
         if n not in counts:
             counts.append(n)
     return counts
 
 
 def _write_staging_jvm_parquet(df: DataFrame, path: Path) -> bool:
-    """JVM parquet materialize (no driver toLocalIterator). Returns True on success."""
+    """Try JVM parquet only (no driver toLocalIterator). Returns True on success."""
     df = _sanitize_df_for_export(df)
     last_exc: BaseException | None = None
     for parts in _staging_jvm_partition_counts():
@@ -857,14 +860,15 @@ def _write_staging_jvm_parquet(df: DataFrame, path: Path) -> bool:
 def collapse_lineage_to_local_parquet(
     spark: SparkSession, df: DataFrame, label: str
 ) -> DataFrame:
-    """Materialize a heavy plan once to local parquet, then read back (short lineage)."""
+    """One JVM materialize of a heavy plan, then read parquet (short lineage for publish)."""
     apply_local_merge_spark_conf(spark)
     path = Path.home() / ".fabric" / "merge_staging" / "_collapse" / label
     if not _write_staging_jvm_parquet(df, path):
         raise RuntimeError(
-            f"collapse_lineage_to_local_parquet failed for {label!r} (Java heap space). "
-            "Use COPILOT_CLOSE_MONTH_NO for one-month bronze, set PYSPARK_DRIVER_MEMORY=12g+, "
-            "or run parse_purview_copilot_bronze_base then collapse before Okta/HC joins."
+            f"collapse_lineage_to_local_parquet failed for {label!r} (often Java heap space). "
+            "Use COPILOT_CLOSE_MONTH_NO for one-month bronze, PYSPARK_DRIVER_MEMORY=12g+, and "
+            "parse_purview_copilot_bronze_base → collapse before Okta/HC joins. "
+            "Do not use driver toLocalIterator on the full Purview join plan."
         )
     _read_progress(f"collapse_lineage: read back local parquet ({label})")
     return spark.read.parquet(str(path))
@@ -877,13 +881,12 @@ def _write_df_to_local_parquet(
     if staging and _use_path_reads():
         if _write_staging_jvm_parquet(df, path):
             return
-        if os.environ.get("MEDALLION_STAGING_MODE", "auto").lower() in (
-            "jvm_only",
-            "spark_only",
-        ):
+        mode = os.environ.get("MEDALLION_STAGING_MODE", "auto").lower()
+        if mode in ("jvm_only", "spark_only"):
             raise RuntimeError(
-                "Merge staging JVM parquet failed (Java heap). "
-                "Materialize parsed bronze before joins, or set COPILOT_CLOSE_MONTH_NO."
+                "Merge staging JVM parquet failed and MEDALLION_STAGING_MODE forbids "
+                "driver collect. Fix: COPILOT_CLOSE_MONTH_NO, more driver memory, "
+                "parse_purview_copilot_bronze_base then collapse before joins."
             )
     if staging and _use_path_reads() and _staging_prefer_chunked_collect():
         parts = _staging_collect_partitions()
