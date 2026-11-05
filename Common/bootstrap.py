@@ -481,6 +481,8 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "purview_active_copilot_aggregate": transforms.purview_active_copilot_aggregate,
             "purview_active_copilot_merge_key": transforms.purview_active_copilot_merge_key,
             "purview_copilot_use_case_code": transforms.purview_copilot_use_case_code,
+            "purview_copilot_automation_poc": transforms.purview_copilot_automation_poc,
+            "purview_copilot_total_hours_saved_poc": transforms.purview_copilot_total_hours_saved_poc,
             "show_sample": show_sample,
             "reload_io_helpers": _bind_reload_io_helpers(notebook_globals),
             "save_table_cache": io.save_table_cache,

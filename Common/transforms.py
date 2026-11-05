@@ -785,6 +785,40 @@ def purview_copilot_use_case_code(interaction_type: Column) -> Column:
     )
 
 
+def purview_copilot_automation_poc(interaction_type: Column) -> Column:
+    """``fact_copilot_active.automation_poc`` by interaction type (business POC table)."""
+    power_bi = interaction_type.isin("Power BI / Fabric", "Power BI-Fabric")
+    others = interaction_type.isin("Other", "Others")
+    agents = interaction_type.isin(
+        "Built-in Agent", "Copilot Studio Agent", "Specialized Agent"
+    )
+    return (
+        F.when(interaction_type == "Web Chat", F.lit("0.70"))
+        .when(interaction_type == "Microsoft 365 App", F.lit("0.617"))
+        .when(agents, F.lit("1.00"))
+        .when(power_bi, F.lit("0.70"))
+        .when(others, F.lit("0.617"))
+        .otherwise(F.lit(None))
+    ).cast("decimal(18,8)")
+
+
+def purview_copilot_total_hours_saved_poc(interaction_type: Column) -> Column:
+    """``fact_copilot_active.totalHoursSaved_poc`` by interaction type."""
+    power_bi = interaction_type.isin("Power BI / Fabric", "Power BI-Fabric")
+    others = interaction_type.isin("Other", "Others")
+    agents = interaction_type.isin(
+        "Built-in Agent", "Copilot Studio Agent", "Specialized Agent"
+    )
+    return (
+        F.when(interaction_type == "Web Chat", F.lit("0.066667"))
+        .when(interaction_type == "Microsoft 365 App", F.lit("0.79"))
+        .when(agents, F.lit("1.14"))
+        .when(power_bi, F.lit("2.43"))
+        .when(others, F.lit("1.69"))
+        .otherwise(F.lit(None))
+    ).cast("decimal(18,8)")
+
+
 def purview_active_copilot_aggregate(silver: DataFrame) -> DataFrame:
     """Group by user, date, interaction type; Request = sum(prompts); keep groups with Request >= 1."""
     grouped = (
