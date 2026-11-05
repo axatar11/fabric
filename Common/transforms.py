@@ -786,8 +786,11 @@ def purview_copilot_use_case_code(interaction_type: Column) -> Column:
 
 
 def purview_copilot_automation_poc(interaction_type: Column) -> Column:
-    """``fact_copilot_active.automation_poc`` by interaction type (business POC table)."""
-    power_bi = interaction_type.isin("Power BI / Fabric", "Power BI-Fabric")
+    """``fact_copilot_active.automation_poc`` by interaction type (business POC table).
+
+    Silver label is ``Power BI / Fabric`` (slash), from ``purview_copilot_interaction_type`` — not hyphenated.
+    """
+    power_bi = interaction_type == "Power BI / Fabric"
     others = interaction_type.isin("Other", "Others")
     agents = interaction_type.isin(
         "Built-in Agent", "Copilot Studio Agent", "Specialized Agent"
@@ -803,8 +806,8 @@ def purview_copilot_automation_poc(interaction_type: Column) -> Column:
 
 
 def purview_copilot_total_hours_saved_poc(interaction_type: Column) -> Column:
-    """``fact_copilot_active.totalHoursSaved_poc`` by interaction type."""
-    power_bi = interaction_type.isin("Power BI / Fabric", "Power BI-Fabric")
+    """``fact_copilot_active.totalHoursSaved_poc`` by interaction type (``Power BI / Fabric`` with slash)."""
+    power_bi = interaction_type == "Power BI / Fabric"
     others = interaction_type.isin("Other", "Others")
     agents = interaction_type.isin(
         "Built-in Agent", "Copilot Studio Agent", "Specialized Agent"
