@@ -83,6 +83,7 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`append_copilot_freeze_month`** | Append copilot freeze row after month-close gold. |
 | **`purview_active_copilot_aggregate` / `purview_active_copilot_merge_key`** | Gold **fact_copilot_active** grain (sum prompts, Request >= 1). |
 | **`purview_copilot_use_case_code`** | Interaction type → `UC-9007-COP-*` use case code. |
+| **`purview_copilot_automation_poc` / `purview_copilot_total_hours_saved_poc`** | Gold POC columns by interaction type (`fact_copilot_active`). |
 | **`cursor_active_daily_aggregate(silver)`** | Gold active: group by date + Okta user, `COUNT(*)` Request. |
 | **`cursor_active_daily_merge_key()`** | SHA2 key per (date, Okta user) for gold active. |
 | **`cursor_onboard_daily_dedupe(silver)`** | One row per user/day (latest ingestion). |
