@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import ArrayType, BooleanType, StringType, StructField, StructType
@@ -217,23 +219,38 @@ def cursor_onboard_merge_key() -> Column:
     )
 
 
+def _bronze_column_key(name: str) -> str:
+    """Match headers regardless of spaces/underscores (``Average weekly hours`` ~ ``AverageWeeklyHours``)."""
+    return re.sub(r"[\s_]+", "", name.lower())
+
+
 def _bronze_column(df: DataFrame, *names: str) -> Column:
-    """Resolve a bronze column when Fabric uses PascalCase or snake_case."""
+    """Resolve a bronze column (exact lower-case, then space/underscore-insensitive match)."""
     lower_map = {c.lower(): c for c in df.columns}
+    norm_map = {_bronze_column_key(c): c for c in df.columns}
     for name in names:
         key = name.lower()
         if key in lower_map:
             return F.col(lower_map[key])
-    raise ValueError(f"Bronze table missing any of: {', '.join(names)}")
+        nkey = _bronze_column_key(name)
+        if nkey in norm_map:
+            return F.col(norm_map[nkey])
+    raise ValueError(
+        f"Bronze table missing any of: {', '.join(names)} (available: {', '.join(df.columns)})"
+    )
 
 
 def _bronze_column_or_null(df: DataFrame, *names: str, dtype: str = "string") -> Column:
     """Like ``_bronze_column`` but returns typed null when the column is absent."""
     lower_map = {c.lower(): c for c in df.columns}
+    norm_map = {_bronze_column_key(c): c for c in df.columns}
     for name in names:
         key = name.lower()
         if key in lower_map:
             return F.col(lower_map[key])
+        nkey = _bronze_column_key(name)
+        if nkey in norm_map:
+            return F.col(norm_map[nkey])
     return F.lit(None).cast(dtype)
 
 
@@ -940,7 +957,7 @@ def build_area_normalized_silver(bronze: DataFrame) -> DataFrame:
 
 def build_tcv_emails_silver(bronze: DataFrame) -> DataFrame:
     return bronze.select(
-        _trim_bronze_string(bronze, "op_co").alias("tcv_emails_op_co"),
+        _trim_bronze_string(bronze, "opco", "op_co").alias("tcv_emails_op_co"),
         _trim_bronze_string(bronze, "opportunity_owner").alias("tcv_emails_opportunity_owner"),
         _trim_bronze_string(bronze, "owner_email").alias("tcv_emails_owner_email"),
     )
@@ -977,15 +994,16 @@ def build_axet_business_unit_silver(bronze: DataFrame) -> DataFrame:
 
 
 def build_country_average_hours_silver(bronze: DataFrame) -> DataFrame:
-    country_norm = _trim_bronze_string(bronze, "Country Normalized", "country_normalized")
+    """Source headers per scope doc: ``Country Normalized``, ``Average month hours``, etc."""
+    country_norm = _trim_bronze_string(bronze, "Country Normalized")
     deduped = _dedupe_by_columns(bronze, country_norm)
-    country_out = _trim_bronze_string(deduped, "Country Normalized", "country_normalized")
+    country_out = _trim_bronze_string(deduped, "Country Normalized")
     return deduped.select(
         country_out.alias("country_average_hours_country_normalized"),
-        _trim_bronze_decimal(deduped, "Average month hours", "average_month_hours").alias(
+        _trim_bronze_decimal(deduped, "Average month hours").alias(
             "country_average_hours_average_month_hours"
         ),
-        _trim_bronze_decimal(deduped, "Average weekly hours", "average_weekly_hours").alias(
+        _trim_bronze_decimal(deduped, "Average weekly hours").alias(
             "country_average_hours_average_weekly_hours"
         ),
         _bronze_timestamp(deduped, "execution_date").alias("country_average_hours_execution_date"),
