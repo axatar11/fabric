@@ -61,6 +61,15 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_PURVIEW_COPILOT_OKTA_REJECT: onelake_table_path(
             med, "Silver/purview_copilot_usage_okta_reject"
         ),
+         config.TABLE_DYNAMIC_ALERTS_BRONZE: onelake_table_path(
+            med, "Bronze/dynamic_alerts"
+        ),
+        config.TABLE_DYNAMIC_ALERTS_SILVER: onelake_table_path(
+            med, "Silver/dynamic_alerts"
+        ),
+        config.TABLE_DIM_DYNAMIC_ALERTS: onelake_table_path(
+            med, "Gold/dim_dynamic_alerts"
+        ),
     }
     active_fqn = getattr(
         config, "TABLE_FACT_CURSOR_ACTIVE", _default_gold_table_fqn("fact_cursor_active")
