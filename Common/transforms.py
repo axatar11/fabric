@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import ArrayType, BooleanType, StringType, StructField, StructType
@@ -219,43 +217,23 @@ def cursor_onboard_merge_key() -> Column:
     )
 
 
-def _bronze_column_key(name: str) -> str:
-    """Collapse spaces/underscores for loose bronze header matching (``AreaUsers`` ~ ``area_users``)."""
-    return re.sub(r"[\s_]+", "", name.lower())
-
-
-def _bronze_column_maps(df: DataFrame) -> tuple[dict[str, str], dict[str, str]]:
-    lower_map = {c.lower(): c for c in df.columns}
-    norm_map = {_bronze_column_key(c): c for c in df.columns}
-    return lower_map, norm_map
-
-
 def _bronze_column(df: DataFrame, *names: str) -> Column:
-    """Resolve a bronze column when Fabric uses PascalCase, snake_case, or spaced headers."""
-    lower_map, norm_map = _bronze_column_maps(df)
+    """Resolve a bronze column when Fabric uses PascalCase or snake_case."""
+    lower_map = {c.lower(): c for c in df.columns}
     for name in names:
         key = name.lower()
         if key in lower_map:
             return F.col(lower_map[key])
-        nkey = _bronze_column_key(name)
-        if nkey in norm_map:
-            return F.col(norm_map[nkey])
-    available = ", ".join(df.columns)
-    raise ValueError(
-        f"Bronze table missing any of: {', '.join(names)} (available: {available})"
-    )
+    raise ValueError(f"Bronze table missing any of: {', '.join(names)}")
 
 
 def _bronze_column_or_null(df: DataFrame, *names: str, dtype: str = "string") -> Column:
     """Like ``_bronze_column`` but returns typed null when the column is absent."""
-    lower_map, norm_map = _bronze_column_maps(df)
+    lower_map = {c.lower(): c for c in df.columns}
     for name in names:
         key = name.lower()
         if key in lower_map:
             return F.col(lower_map[key])
-        nkey = _bronze_column_key(name)
-        if nkey in norm_map:
-            return F.col(norm_map[nkey])
     return F.lit(None).cast(dtype)
 
 
@@ -950,27 +928,13 @@ def _dedupe_by_columns(df: DataFrame, *key_exprs: Column) -> DataFrame:
 
 def build_area_normalized_silver(bronze: DataFrame) -> DataFrame:
     return bronze.select(
-        _trim_bronze_string(
-            bronze,
-            "AreaUsers",
-            "area_users",
-            "areausers",
-            "area_normalized_area_users",
-        ).alias("area_normalized_area_users"),
-        _trim_bronze_string(
-            bronze,
-            "AreaCore",
-            "area_core",
-            "areacore",
-            "area_normalized_area_core",
-        ).alias("area_normalized_area_core"),
-        _trim_bronze_string(
-            bronze,
-            "Division_INC",
-            "Division INC",
-            "division_inc",
-            "area_normalized_division_inc",
-        ).alias("area_normalized_division_inc"),
+        _trim_bronze_string(bronze, "AreaUsers", "areausers").alias(
+            "area_normalized_area_users"
+        ),
+        _trim_bronze_string(bronze, "AreaCore", "areacore").alias("area_normalized_area_core"),
+        _trim_bronze_string(bronze, "Division_INC", "division_inc").alias(
+            "area_normalized_division_inc"
+        ),
     )
 
 
@@ -992,10 +956,12 @@ def build_tcv_countries_region_silver(bronze: DataFrame) -> DataFrame:
 
 def build_tcv_stage_normalized_silver(bronze: DataFrame) -> DataFrame:
     return bronze.select(
-        _trim_bronze_string(bronze, "normalized_stage").alias("tcv_stage_normalized_stage"),
-        _trim_bronze_string(bronze, "stage_Normalized", "stage_normalized").alias(
-            "tcv_stage_normalized_stage_Normalized"
+        _trim_bronze_string(bronze, "Stage", "stage", "normalized_stage").alias(
+            "tcv_stage_normalized_stage"
         ),
+        _trim_bronze_string(
+            bronze, "Stage Normalized", "stage_Normalized", "stage_normalized"
+        ).alias("tcv_stage_normalized_stage_Normalized"),
     )
 
 
