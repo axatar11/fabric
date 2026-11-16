@@ -13,6 +13,9 @@ Example (PowerShell):
   cd C:\\spark-dev\\fabric\\fabric
   python Scripts\\sync_to_ado.py --dry-run
   python Scripts\\sync_to_ado.py
+
+Pull ADO → this repo: ``Scripts/sync_from_ado.py`` (run ``git pull`` in the ADO clone first).
+
   cd C:\\spark-dev\\CoE_Transformation_Framework
   git status
   git add -A
