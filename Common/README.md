@@ -88,6 +88,7 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`cursor_active_daily_merge_key()`** | SHA2 key per (date, Okta user) for gold active. |
 | **`cursor_onboard_daily_dedupe(silver)`** | One row per user/day (latest ingestion). |
 | **`cursor_onboard_merge_key()`** | SHA2 key for gold onboard. |
+| **`build_*_silver` / `iter_reference_silver_pipelines()`** | Reporting reference Bronze → Silver (`NB_ReferenceTables_BronzeToSilver`). |
 
 ---
 

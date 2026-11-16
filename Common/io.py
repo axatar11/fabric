@@ -61,7 +61,7 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_PURVIEW_COPILOT_OKTA_REJECT: onelake_table_path(
             med, "Silver/purview_copilot_usage_okta_reject"
         ),
-         config.TABLE_DYNAMIC_ALERTS_BRONZE: onelake_table_path(
+        config.TABLE_DYNAMIC_ALERTS_BRONZE: onelake_table_path(
             med, "Bronze/dynamic_alerts"
         ),
         config.TABLE_DYNAMIC_ALERTS_SILVER: onelake_table_path(
@@ -69,6 +69,56 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         ),
         config.TABLE_DIM_DYNAMIC_ALERTS: onelake_table_path(
             med, "Gold/dim_dynamic_alerts"
+        ),
+        config.TABLE_AREA_NORMALIZED_BRONZE: onelake_table_path(
+            med, "Bronze/area_normalized"
+        ),
+        config.TABLE_AREA_NORMALIZED_SILVER: onelake_table_path(
+            med, "Silver/area_normalized"
+        ),
+        config.TABLE_TCV_EMAILS_BRONZE: onelake_table_path(med, "Bronze/tcv_emails"),
+        config.TABLE_TCV_EMAILS_SILVER: onelake_table_path(med, "Silver/tcv_emails"),
+        config.TABLE_TCV_COUNTRIES_REGION_BRONZE: onelake_table_path(
+            med, "Bronze/tcv_countries_region"
+        ),
+        config.TABLE_TCV_COUNTRIES_REGION_SILVER: onelake_table_path(
+            med, "Silver/tcv_countries_region"
+        ),
+        config.TABLE_TCV_STAGE_NORMALIZED_BRONZE: onelake_table_path(
+            med, "Bronze/tcv_stage_normalized"
+        ),
+        config.TABLE_TCV_STAGE_NORMALIZED_SILVER: onelake_table_path(
+            med, "Silver/tcv_stage_normalized"
+        ),
+        config.TABLE_AXET_BUSINESS_UNIT_BRONZE: onelake_table_path(
+            med, "Bronze/business_unit"
+        ),
+        config.TABLE_AXET_BUSINESS_UNIT_SILVER: onelake_table_path(
+            med, "Silver/axet_business_unit"
+        ),
+        config.TABLE_COUNTRY_AVERAGE_HOURS_BRONZE: onelake_table_path(
+            med, "Bronze/country_average_hours"
+        ),
+        config.TABLE_COUNTRY_AVERAGE_HOURS_SILVER: onelake_table_path(
+            med, "Silver/country_average_hours"
+        ),
+        config.TABLE_NORMALIZATION_COUNTRIES_OKTA_BRONZE: onelake_table_path(
+            med, "Bronze/normalization_countries_okta"
+        ),
+        config.TABLE_NORMALIZATION_COUNTRIES_OKTA_SILVER: onelake_table_path(
+            med, "Silver/normalization_countries_okta"
+        ),
+        config.TABLE_NORMALIZATION_COUNTRIES_CORE_BRONZE: onelake_table_path(
+            med, "Bronze/normalization_countries_core"
+        ),
+        config.TABLE_NORMALIZATION_COUNTRIES_CORE_SILVER: onelake_table_path(
+            med, "Silver/normalization_countries_core"
+        ),
+        config.TABLE_PRL_OFFICE_LOCATIONS_BRONZE: onelake_table_path(
+            med, "Bronze/prl_office_locations"
+        ),
+        config.TABLE_PRL_OFFICE_LOCATIONS_SILVER: onelake_table_path(
+            med, "Silver/prl_office_locations"
         ),
     }
     active_fqn = getattr(

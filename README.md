@@ -7,7 +7,7 @@ Bronze → Silver → Gold for HC, Okta, and cursor_usage.
 | Folder | Notebooks |
 |--------|-----------|
 | `Notebook/Bronze/` | (ingest in Fabric — no pipeline notebooks) |
-| `Notebook/Silver/` | `NB_HCHistorical_Bronze_To_Silver`, `NB_OktaUserforAI_Bronze_To_Silver`, `NB_CursorUsage_Bronze_To_Silver`, `NB_Purview_Copilot_BronzeToSilver` |
+| `Notebook/Silver/` | HC, Okta, Cursor, Purview Copilot, `NB_ReferenceTables_BronzeToSilver` (see `Notebook/Silver/README.md`) |
 | `Notebook/Gold/` | `NB_CursorUsage_Gold`, `NB_CursorOnboard_Gold`, `NB_Purview_Copilot_SilverToGold` |
 | `Common/` | Bootstrap, config, I/O, transforms — see **`Common/README.md`** |
 | `Scripts/` | `check_env.py`, `verify_local_spark.py`, `reinstall_local_spark.ps1`, `sync_notebooks_to_entry.py` |
