@@ -13,7 +13,6 @@ from Common.transform_cursor import (
     filter_through_close_month_ts,
     filter_to_month_no,
     is_valid_email,
-    join_hc_on_email_keys,
 )
 
 
