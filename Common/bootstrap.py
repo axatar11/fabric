@@ -405,9 +405,21 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     from pyspark.sql import functions as F
 
     _ensure_pyspark_installed()
-    from Common import transforms
+    from Common import (
+        transform_bronze,
+        transform_core,
+        transform_cursor,
+        transform_purview,
+        transform_reference,
+        transforms,
+    )
 
     importlib.reload(io)
+    importlib.reload(transform_bronze)
+    importlib.reload(transform_cursor)
+    importlib.reload(transform_purview)
+    importlib.reload(transform_reference)
+    importlib.reload(transform_core)
     importlib.reload(transforms)
     _ensure_onelake_read_deps()
     spark, info = _get_spark(notebook_globals, app_name)
@@ -493,6 +505,18 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "build_normalization_countries_core_silver": transforms.build_normalization_countries_core_silver,
             "build_prl_office_locations_silver": transforms.build_prl_office_locations_silver,
             "iter_reference_silver_pipelines": transforms.iter_reference_silver_pipelines,
+            "build_core_asset_silver": transform_core.build_core_asset_silver,
+            "build_core_country_silver": transform_core.build_core_country_silver,
+            "build_core_billing_silver": transform_core.build_core_billing_silver,
+            "build_core_project_silver": transform_core.build_core_project_silver,
+            "build_core_okta_user_silver": transform_core.build_core_okta_user_silver,
+            "build_dim_project_silver": transform_core.build_dim_project_silver,
+            "build_core_use_case_implementation_silver": (
+                transform_core.build_core_use_case_implementation_silver
+            ),
+            "build_core_use_case_adjustment_silver": (
+                transform_core.build_core_use_case_adjustment_silver
+            ),
             "show_sample": show_sample,
             "reload_io_helpers": _bind_reload_io_helpers(notebook_globals),
             "save_table_cache": io.save_table_cache,

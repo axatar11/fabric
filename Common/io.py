@@ -120,6 +120,29 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_PRL_OFFICE_LOCATIONS_SILVER: onelake_table_path(
             med, "Silver/prl_office_locations"
         ),
+        config.TABLE_CORE_ASSET_BRONZE: onelake_table_path(med, "Bronze/core_asset"),
+        config.TABLE_CORE_ASSET_SILVER: onelake_table_path(med, "Silver/core_asset"),
+        config.TABLE_CORE_COUNTRY_BRONZE: onelake_table_path(med, "Bronze/core_country"),
+        config.TABLE_CORE_COUNTRY_SILVER: onelake_table_path(med, "Silver/core_country"),
+        config.TABLE_CORE_BILLING_BRONZE: onelake_table_path(med, "Bronze/core_billing"),
+        config.TABLE_CORE_BILLING_SILVER: onelake_table_path(med, "Silver/core_billing"),
+        config.TABLE_CORE_PROJECT_BRONZE: onelake_table_path(med, "Bronze/core_project"),
+        config.TABLE_CORE_PROJECT_SILVER: onelake_table_path(med, "Silver/core_project"),
+        config.TABLE_CORE_OKTA_USER_BRONZE: onelake_table_path(med, "Bronze/core_okta_user"),
+        config.TABLE_CORE_OKTA_USER_SILVER: onelake_table_path(med, "Silver/core_okta_user"),
+        config.TABLE_DIM_PROJECT_SILVER: onelake_table_path(med, "Silver/dim_project"),
+        config.TABLE_CORE_USE_CASE_IMPLEMENTATION_BRONZE: onelake_table_path(
+            med, "Bronze/core_use_case_implementation"
+        ),
+        config.TABLE_CORE_USE_CASE_IMPLEMENTATION_SILVER: onelake_table_path(
+            med, "Silver/core_use_case_implementation"
+        ),
+        config.TABLE_CORE_USE_CASE_ADJUSTMENT_BRONZE: onelake_table_path(
+            med, "Bronze/core_use_case_adjustment"
+        ),
+        config.TABLE_CORE_USE_CASE_ADJUSTMENT_SILVER: onelake_table_path(
+            med, "Silver/core_use_case_adjustment"
+        ),
     }
     active_fqn = getattr(
         config, "TABLE_FACT_CURSOR_ACTIVE", _default_gold_table_fqn("fact_cursor_active")
