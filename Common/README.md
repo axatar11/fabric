@@ -88,6 +88,8 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`cursor_active_daily_merge_key()`** | SHA2 key per (date, Okta user) for gold active. |
 | **`cursor_onboard_daily_dedupe(silver)`** | One row per user/day (latest ingestion). |
 | **`cursor_onboard_merge_key()`** | SHA2 key for gold onboard. |
+| **`purview_copilot_onboard_daily_dedupe(silver)`** | Copilot onboard: one row per user/day (latest ingestion + record id). |
+| **`purview_copilot_onboard_merge_key()`** | SHA2 key for `fact_copilot_onboard`. |
 | **Transform modules** | `transform_bronze.py` (header helpers), `transform_cursor.py`, `transform_purview.py`, `transform_codex.py`, `transform_reference.py`, `transform_core.py` — re-exported by `transforms.py`. |
 
 ---

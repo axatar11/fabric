@@ -494,6 +494,8 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "purview_copilot_bronze_scan_predicate": transforms.purview_copilot_bronze_scan_predicate,
             "purview_active_copilot_aggregate": transforms.purview_active_copilot_aggregate,
             "purview_active_copilot_merge_key": transforms.purview_active_copilot_merge_key,
+            "purview_copilot_onboard_daily_dedupe": transforms.purview_copilot_onboard_daily_dedupe,
+            "purview_copilot_onboard_merge_key": transforms.purview_copilot_onboard_merge_key,
             "purview_copilot_use_case_code": transforms.purview_copilot_use_case_code,
             "purview_copilot_automation_poc": transforms.purview_copilot_automation_poc,
             "purview_copilot_total_hours_saved_poc": transforms.purview_copilot_total_hours_saved_poc,

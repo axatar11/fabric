@@ -182,6 +182,13 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         med,
         os.environ.get("ONELAKE_GOLD_FACT_COPILOT_ACTIVE", "Gold/fact_copilot_active"),
     )
+    copilot_onboard_fqn = getattr(
+        config, "TABLE_FACT_COPILOT_ONBOARD", _default_gold_table_fqn("fact_copilot_onboard")
+    )
+    mapping[copilot_onboard_fqn] = onelake_table_path(
+        med,
+        os.environ.get("ONELAKE_GOLD_FACT_COPILOT_ONBOARD", "Gold/fact_copilot_onboard"),
+    )
     mapping[config.TABLE_INGEST_FREEZE_CONTROL] = onelake_table_path(
         med, "Gold/ingest_freeze_control"
     )

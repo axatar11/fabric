@@ -648,4 +648,31 @@ def purview_active_copilot_merge_key() -> Column:
     )
 
 
+def purview_copilot_onboard_daily_dedupe(silver: DataFrame) -> DataFrame:
+    """One row per ``(purview_copilot_usage_date, okta_user_id)`` — latest ingestion, then record id."""
+    from pyspark.sql.window import Window
+
+    w = Window.partitionBy("purview_copilot_usage_date", "okta_user_id").orderBy(
+        F.col("purview_copilot_usage_ingestion_date").desc_nulls_last(),
+        F.col("purview_copilot_usage_record_id").desc_nulls_last(),
+    )
+    return (
+        silver.withColumn("_onboard_rn", F.row_number().over(w))
+        .filter(F.col("_onboard_rn") == 1)
+        .drop("_onboard_rn")
+    )
+
+
+def purview_copilot_onboard_merge_key() -> Column:
+    """SHA2 surrogate key: activity date ``|`` Okta user id."""
+    return F.sha2(
+        F.concat_ws(
+            "|",
+            F.coalesce(F.col("purview_copilot_usage_date").cast("string"), F.lit("")),
+            F.coalesce(F.col("okta_user_id"), F.lit("")),
+        ),
+        256,
+    )
+
+
 
