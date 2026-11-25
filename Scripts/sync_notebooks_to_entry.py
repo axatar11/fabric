@@ -48,6 +48,7 @@ def main() -> None:
         "Notebook/Silver/NB_OktaUserforAI_Bronze_To_Silver.ipynb",
         "Notebook/Silver/NB_CursorUsage_Bronze_To_Silver.ipynb",
         "Notebook/Silver/NB_Purview_Copilot_BronzeToSilver.ipynb",
+        "Notebook/Silver/NB_OpenAI_Codex_BronzeToSilver.ipynb",
         "Notebook/Silver/NB_ReferenceTables_BronzeToSilver.ipynb",
         "Notebook/Silver/NB_CoreReporting_BronzeToSilver.ipynb",
     ):

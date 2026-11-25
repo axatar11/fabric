@@ -407,6 +407,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     _ensure_pyspark_installed()
     from Common import (
         transform_bronze,
+        transform_codex,
         transform_core,
         transform_cursor,
         transform_purview,
@@ -420,6 +421,7 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
     importlib.reload(transform_purview)
     importlib.reload(transform_reference)
     importlib.reload(transform_core)
+    importlib.reload(transform_codex)
     importlib.reload(transforms)
     _ensure_onelake_read_deps()
     spark, info = _get_spark(notebook_globals, app_name)
@@ -517,6 +519,10 @@ def init_notebook(notebook_globals: dict[str, Any], app_name: str = "Medallion")
             "build_core_use_case_adjustment_silver": (
                 transform_core.build_core_use_case_adjustment_silver
             ),
+            "parse_codex_bronze_base": transforms.parse_codex_bronze_base,
+            "okta_slim_for_codex": transforms.okta_slim_for_codex,
+            "join_codex_okta_with_priorities": transforms.join_codex_okta_with_priorities,
+            "build_codex_usage_silver": transforms.build_codex_usage_silver,
             "show_sample": show_sample,
             "reload_io_helpers": _bind_reload_io_helpers(notebook_globals),
             "save_table_cache": io.save_table_cache,

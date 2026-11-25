@@ -43,6 +43,11 @@ def delta_path_for_table(table_fqn: str) -> str | None:
     mapping = {
         config.TABLE_CURSOR_BRONZE: config.ONELAKE_CURSOR_BRONZE_PATH,
         config.TABLE_PURVIEW_COPILOT_BRONZE: config.ONELAKE_PURVIEW_COPILOT_BRONZE_PATH,
+        config.TABLE_OPENAI_USAGE_BRONZE: onelake_table_path(med, "Bronze/openai_usage"),
+        config.TABLE_CODEX_USAGE_SILVER: onelake_table_path(med, "Silver/codex_usage"),
+        config.TABLE_CODEX_USAGE_MATCHING_LOG_SILVER: onelake_table_path(
+            med, "Silver/codex_usage_matching_log"
+        ),
         config.TABLE_HC_BRONZE: onelake_table_path(bronze, "dbo/HC_Bronze_Historical"),
         config.TABLE_OKTA_BRONZE: onelake_table_path(bronze, "dbo/CoreOktaUser"),
         config.TABLE_COUNTRY: onelake_table_path(

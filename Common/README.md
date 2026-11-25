@@ -88,7 +88,7 @@ Lakehouse GUIDs, **`TABLE_*`** FQNs (bronze/silver/gold), gold `fact_cursor_*` c
 | **`cursor_active_daily_merge_key()`** | SHA2 key per (date, Okta user) for gold active. |
 | **`cursor_onboard_daily_dedupe(silver)`** | One row per user/day (latest ingestion). |
 | **`cursor_onboard_merge_key()`** | SHA2 key for gold onboard. |
-| **Transform modules** | `transform_bronze.py` (header helpers), `transform_cursor.py`, `transform_purview.py`, `transform_reference.py`, `transform_core.py` — re-exported by `transforms.py`. |
+| **Transform modules** | `transform_bronze.py` (header helpers), `transform_cursor.py`, `transform_purview.py`, `transform_codex.py`, `transform_reference.py`, `transform_core.py` — re-exported by `transforms.py`. |
 
 ---
 

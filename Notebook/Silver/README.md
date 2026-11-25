@@ -6,6 +6,7 @@ Run in order:
 2. `NB_OktaUserforAI_Bronze_To_Silver.ipynb`
 3. `NB_CursorUsage_Bronze_To_Silver.ipynb` (requires HC + Okta silver)
 4. `NB_Purview_Copilot_BronzeToSilver.ipynb` (requires HC + Okta silver)
+5. `NB_OpenAI_Codex_BronzeToSilver.ipynb` (requires Okta silver; `Common/transform_codex.py`)
 
 **Reference tables:** `NB_ReferenceTables_BronzeToSilver.ipynb` — one code cell per table (full overwrite). Registry: `iter_reference_silver_pipelines()` in `Common/transforms.py`.
 
