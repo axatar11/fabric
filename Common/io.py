@@ -70,6 +70,18 @@ def delta_path_for_table(table_fqn: str) -> str | None:
         config.TABLE_DIM_DYNAMIC_ALERTS: onelake_table_path(
             med, "Gold/dim_dynamic_alerts"
         ),
+
+           config.TABLE_SECURITY_BRONZE: onelake_table_path(
+            med, "Bronze/security"
+        ),
+        config.TABLE_SECURITY_SILVER: onelake_table_path(
+            med, "Silver/security"
+        ),
+
+         config.TABLE_DIM_SECURITY: onelake_table_path(
+            med, "Gold/dim_security"
+        ),
+
         config.TABLE_AREA_NORMALIZED_BRONZE: onelake_table_path(
             med, "Bronze/area_normalized"
         ),
